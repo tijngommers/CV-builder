@@ -1,4 +1,7 @@
 export const CV = {
+
+    photo: './public/profile-picture.jpg',
+
     personalInfo: { 
         name: 'Tijn Gommers',
         Birthdate: '16/07/2005'

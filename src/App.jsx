@@ -7,6 +7,9 @@ function App() {
   return (
     <main>
       <section className="basic-info">
+        <section className="photo">
+          <img src={cvData.photo} alt={`${cvData.personalInfo.name}'s photo`} />
+        </section>
         <section className="personal-info">
           <h1>{cvData.personalInfo.name}</h1>
           <p>Birthdate: {cvData.personalInfo.Birthdate}</p>
