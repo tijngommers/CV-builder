@@ -1,0 +1,385 @@
+/* Reset and base styles */
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+:root {
+  --primary-color: #2c3e50;
+  --secondary-color: #2c3e50;
+  --accent-color: #2c3e50;
+  --text-color: #333;
+  --light-gray: #ecf0f1;
+  --border-color: #ddd;
+  --background: #ffffff;
+  --section-bg: #ffffff;
+}
+
+body {
+  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+  line-height: 1.6;
+  color: var(--text-color);
+  background-color: #f5f5f5;
+}
+
+/* Main container */
+main {
+  max-width: 1200px;
+  margin: 2rem auto;
+  padding: 0;
+  background-color: var(--background);
+  box-shadow: 0 0 10px rgba(0, 0, 0, 0.08);
+  display: flex;
+  gap: 0;
+  align-items: flex-start;
+}
+
+/* Two Column Layout */
+.basic-info {
+  flex: 0 0 320px;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  background-color: #2c2c2c;
+  color: white;
+  padding: 2rem 1.5rem;
+}
+
+.main-info {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  background-color: white;
+  padding: 2rem;
+}
+
+/* Personal Info Section */
+.personal-info {
+  text-align: center;
+  padding: 0 0 1.5rem 0;
+  background-color: transparent;
+  border-bottom: 2px solid #555;
+  margin-bottom: 1.5rem;
+}
+
+.personal-info h1 {
+  font-size: 2rem;
+  color: white;
+  margin-bottom: 0.3rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+
+.personal-info p {
+  color: #ccc;
+  font-size: 0.85rem;
+}
+
+/* Section Styles */
+.basic-info section,
+.main-info section {
+  padding: 0;
+  background-color: transparent;
+  margin-bottom: 1.5rem;
+}
+
+.basic-info section:last-child,
+.main-info section:last-child {
+  margin-bottom: 0;
+}
+
+section h2 {
+  color: var(--primary-color);
+  font-size: 1.3rem;
+  margin: 0 0 1rem 0;
+  padding: 0.8rem 1rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  background-color: #e8e8e8;
+}
+
+.basic-info section h2 {
+  background-color: #3d3d3d;
+  color: white;
+}
+
+.basic-info section {
+  color: white;
+}
+
+section h3 {
+  color: var(--text-color);
+  font-size: 1rem;
+  margin-top: 0.8rem;
+  margin-bottom: 0.3rem;
+  font-weight: 600;
+}
+
+section p {
+  margin-bottom: 0.5rem;
+  line-height: 1.6;
+  color: var(--text-color);
+}
+
+/* Contact Section */
+.contact p {
+  font-size: 0.9rem;
+  padding: 0 1rem;
+  margin-bottom: 0.3rem;
+}
+
+.basic-info .contact p {
+  color: #ddd;
+}
+
+/* Profile Section */
+.profile p {
+  font-size: 0.95rem;
+  line-height: 1.7;
+  text-align: justify;
+  padding: 0 1rem;
+}
+
+/* Skills Section */
+.skills h3 {
+  font-size: 0.95rem;
+  margin-top: 1rem;
+  margin-bottom: 0.5rem;
+  padding: 0 1rem;
+}
+
+.skills ul {
+  list-style: disc;
+  padding-left: 3rem;
+  margin-top: 0.3rem;
+}
+
+.skills li {
+  font-size: 0.9rem;
+  padding: 0.2rem 0;
+}
+
+.basic-info .skills h3 {
+  color: white;
+}
+
+.basic-info .skills li {
+  color: #ddd;
+}
+
+/* Languages Section */
+.languages ul {
+  list-style: none;
+  padding: 0 1rem;
+}
+
+.languages li {
+  padding: 0.4rem 0;
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.9rem;
+}
+
+.languages li:last-child {
+  border-bottom: none;
+}
+
+.basic-info .languages li {
+  color: #ddd;
+}
+
+/* Hobbies Section */
+.hobbies ul {
+  list-style: disc;
+  padding-left: 3rem;
+}
+
+.hobbies li {
+  font-size: 0.9rem;
+  padding: 0.2rem 0;
+}
+
+.basic-info .hobbies li {
+  color: #ddd;
+}
+
+/* Education Section */
+.education-item {
+  padding: 0.8rem 1rem;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.education-item:last-child {
+  border-bottom: none;
+}
+
+.education-item h3 {
+  color: var(--text-color);
+  margin-top: 0;
+  font-size: 0.85rem;
+  font-weight: 500;
+  color: #666;
+}
+
+.education-item p {
+  font-size: 0.9rem;
+}
+
+.education-item strong {
+  color: var(--primary-color);
+  font-weight: 600;
+}
+
+/* Work Experience Section */
+.work-item {
+  padding: 0.8rem 1rem;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.work-item:last-child {
+  border-bottom: none;
+}
+
+.work-item h3 {
+  color: #666;
+  margin-top: 0;
+  font-size: 0.85rem;
+  font-weight: 500;
+}
+
+.work-item p {
+  font-size: 0.9rem;
+}
+
+.work-item strong {
+  color: var(--primary-color);
+  font-weight: 600;
+}
+
+/* Hackathons Section */
+.hackathon-item {
+  padding: 0.8rem 1rem;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.hackathon-item:last-child {
+  border-bottom: none;
+}
+
+.hackathon-item h3 {
+  color: var(--primary-color);
+  margin-top: 0;
+  font-size: 0.95rem;
+  font-weight: 600;
+}
+
+.hackathon-item p {
+  font-size: 0.9rem;
+  color: var(--text-color);
+}
+
+/* Prizes Section */
+.prize-item {
+  padding: 0.8rem 1rem;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.prize-item:last-child {
+  border-bottom: none;
+}
+
+.prize-item h3 {
+  color: var(--primary-color);
+  margin-top: 0;
+  font-size: 0.95rem;
+  font-weight: 600;
+}
+
+.prize-item p {
+  font-size: 0.9rem;
+}
+
+/* Degrees Section */
+.degree-item {
+  padding: 0.8rem 1rem;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.degree-item:last-child {
+  border-bottom: none;
+}
+
+.degree-item h3 {
+  color: var(--primary-color);
+  margin-top: 0;
+  font-size: 0.95rem;
+  font-weight: 600;
+}
+
+.degree-item p {
+  font-size: 0.9rem;
+}
+
+.degree-item strong {
+  color: var(--primary-color);
+  font-weight: 600;
+}
+
+/* Responsive Design */
+@media (max-width: 768px) {
+  main {
+    margin: 1rem;
+    padding: 1.5rem;
+    flex-direction: column;
+  }
+
+  .basic-info {
+    flex: none;
+    width: 100%;
+  }
+
+  .main-info {
+    flex: none;
+    width: 100%;
+  }
+
+  .personal-info h1 {
+    font-size: 2rem;
+  }
+
+  .basic-info section,
+  .main-info section {
+    padding: 1rem;
+  }
+
+  section h2 {
+    font-size: 1.5rem;
+  }
+
+  .skills ul {
+    flex-direction: column;
+  }
+}
+
+/* Print Styles */
+@media print {
+  body {
+    background-color: white;
+  }
+
+  main {
+    box-shadow: none;
+    margin: 0;
+    max-width: 100%;
+    padding: 1rem;
+  }
+
+  .basic-info section,
+  .main-info section {
+    page-break-inside: avoid;
+  }
+}
