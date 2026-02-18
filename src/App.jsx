@@ -4,11 +4,21 @@ import { CV } from './data/initialData.mts';
 function App() {
   const [cvData, setCvData] = useState(CV);
 
+  const handlePrint = () => {
+    window.print();
+  };
+
   return (
-    <main>
+    <>
+      <button className="download-pdf-btn" onClick={handlePrint}>
+        Download als PDF
+      </button>
+      <main>
       <section className="basic-info">
         <section className="photo">
-          <img src={cvData.photo} alt={`${cvData.personalInfo.name}'s photo`} />
+          <div className="photo-wrapper">
+            <img src={cvData.photo} alt={`${cvData.personalInfo.name}'s photo`} />
+          </div>
         </section>
         <section className="personal-info">
           <h1>{cvData.personalInfo.name}</h1>
@@ -82,10 +92,10 @@ function App() {
 
         <section className="work-experience">
           <h2>Work Experience</h2>
-          {Object.entries(cvData.Work_experience).map(([period, work]) => (
-            <div key={period} className="work-item">
-              <h3>{period}</h3>
-              <p><strong>{work.position}</strong> at {work.company}</p>
+          {Object.entries(cvData.Work_experience).map(([position, work]) => (
+            <div key={position} className="work-item">
+              <h3>{work.period}</h3>
+              <p><strong>{position}</strong> at {work.company}</p>
               <p>{work.description}</p>
             </div>
           ))}
@@ -127,6 +137,7 @@ function App() {
 
       </section>
     </main>
+    </>
   );
 }
 

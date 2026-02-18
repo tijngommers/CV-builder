@@ -1,6 +1,6 @@
 export const CV = {
 
-    photo: './public/profile-picture.jpg',
+    photo: '/profile-picture.jpg',
 
     personalInfo: { 
         name: 'Tijn Gommers',
@@ -29,29 +29,29 @@ export const CV = {
     Profile: '...',
 
     Work_experience: {
-        '2025-2026': {
+        'Startups in AI organizer': {
             company: 'NEXT Leuven',
-            position: 'Startups in AI organizer',
+            period: '2025-2026',
             description: 'Organized the Startups in AI event for the student organization NEXT Leuven.'
         },
-        '2025': {
+        'PAL tutor': {
             company: 'VTK Leuven',
-            position: 'PAL tutor',
+            period: '2025',
             description: 'Tutored first year civil engineering students in mechanics.'
         },
-        '2023-...': {
+        'Lifeguard - Plas van Rotselaar': {
             company: 'Plas van Rotselaar',
-            position: 'Lifeguard',
+            period: '2023-...',
             description: 'Worked as a lifeguard at the Plas van Rotselaar during the summer holidays.'
         },
-        '2023': {
+        'Lifeguard - Sportoase': {
             company: 'Sportoase Leuven',
-            position: 'Lifeguard',
+            period: '2023',
             description: 'Worked as a lifeguard at the Sportoase Leuven during the summer holidays.'
         },
-        '2021-2023': {
+        'Cashier': {
             company: 'Dehhaize Wilsele',
-            position: 'Cashier',
+            period: '2021-2023',
             description: 'Worked as a cashier at Dehhaize Wilsele during the weekends and holidays.'}
     },
 
