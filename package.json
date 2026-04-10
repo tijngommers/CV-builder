@@ -4,7 +4,7 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
-    "dev": "concurrently \"npm:dev:client\" \"npm:dev:server\"",
+    "dev": "set \"PDFLATEX_PATH=%LOCALAPPDATA%\\Programs\\MiKTeX\\miktex\\bin\\x64\\pdflatex.exe\" && concurrently \"npm:dev:client\" \"npm:dev:server\"",
     "dev:client": "vite",
     "dev:server": "node server/index.js",
     "start:server": "node server/index.js",
