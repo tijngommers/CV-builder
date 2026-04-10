@@ -1,142 +1,188 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { CV } from './data/initialData.mts';
 
 function App() {
-  const [cvData, setCvData] = useState(CV);
+  const [cvData] = useState(CV);
+  const [isGenerating, setIsGenerating] = useState(false);
+  const [downloadError, setDownloadError] = useState('');
+  const [pdfPreviewUrl, setPdfPreviewUrl] = useState('');
+  const [pdfFileName, setPdfFileName] = useState('cv.pdf');
 
-  const handlePrint = () => {
-    window.print();
+  useEffect(() => () => {
+    if (pdfPreviewUrl) {
+      URL.revokeObjectURL(pdfPreviewUrl);
+    }
+  }, [pdfPreviewUrl]);
+
+  const handleGeneratePdf = async () => {
+    setIsGenerating(true);
+    setDownloadError('');
+
+    try {
+      const response = await fetch('/api/render-pdf', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(cvData),
+      });
+
+      if (!response.ok) {
+        const result = await response.json().catch(() => ({}));
+        throw new Error(result.error || 'Failed to generate PDF.');
+      }
+
+      const pdfBlob = await response.blob();
+      const fileUrl = URL.createObjectURL(pdfBlob);
+      const contentDisposition = response.headers.get('content-disposition') || '';
+      const filenameMatch = contentDisposition.match(/filename="?([^";]+)"?/i);
+      const fileName = filenameMatch?.[1] || 'cv.pdf';
+
+      setPdfPreviewUrl((previousUrl) => {
+        if (previousUrl) {
+          URL.revokeObjectURL(previousUrl);
+        }
+        return fileUrl;
+      });
+      setPdfFileName(fileName);
+    } catch (error) {
+      setDownloadError(error instanceof Error ? error.message : 'Unexpected error while generating PDF.');
+    } finally {
+      setIsGenerating(false);
+    }
+  };
+
+  const handleDownloadPreview = () => {
+    if (!pdfPreviewUrl) {
+      return;
+    }
+
+    const link = document.createElement('a');
+    link.href = pdfPreviewUrl;
+    link.download = pdfFileName;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
   };
 
   return (
     <>
-      <button className="download-pdf-btn" onClick={handlePrint}>
-        Download als PDF
-      </button>
-      <main>
-      <section className="basic-info">
-        <section className="photo">
-          <div className="photo-wrapper">
-            <img src={cvData.photo} alt={`${cvData.personalInfo.name}'s photo`} />
+      <div className="pdf-controls">
+        <button className="download-pdf-btn" onClick={handleGeneratePdf} disabled={isGenerating}>
+          {isGenerating ? 'Generating PDF...' : 'Generate LaTeX PDF'}
+        </button>
+        {pdfPreviewUrl ? (
+          <button className="download-pdf-btn secondary" onClick={handleDownloadPreview}>
+            Download Current PDF
+          </button>
+        ) : null}
+      </div>
+      {downloadError ? <p className="download-error">{downloadError}</p> : null}
+      {pdfPreviewUrl ? (
+        <section className="pdf-preview-wrapper" aria-label="Generated LaTeX PDF preview">
+          <h2>Generated PDF Preview</h2>
+          <iframe title="LaTeX CV PDF Preview" src={pdfPreviewUrl} className="pdf-preview-frame" />
+        </section>
+      ) : null}
+      <main className="cv-page">
+        <header className="cv-header">
+          <div className="header-top-row">
+            <h1>{cvData.personalInfo.name}</h1>
+            <p>{cvData.personalInfo.Birthdate}</p>
           </div>
-        </section>
-        <section className="personal-info">
-          <h1>{cvData.personalInfo.name}</h1>
-          <p>Birthdate: {cvData.personalInfo.Birthdate}</p>
-        </section>
+          <div className="header-bottom-row">
+            <p>{cvData.contact.phonenumber}</p>
+            <span className="header-separator" aria-hidden="true">|</span>
+            <p>{cvData.contact.email}</p>
+            <span className="header-separator" aria-hidden="true">|</span>
+            <p>{cvData.contact.adress}</p>
+          </div>
+        </header>
 
-        <section className="contact">
-          <h2>Contact</h2>
-          <p>Phone: {cvData.contact.phonenumber}</p>
-          <p>Email: {cvData.contact.email}</p>
-          <p>Address: {cvData.contact.adress}</p>
-        </section>
-
-        <section className="skills">
-        <h2>Skills</h2>
-        <div>
-          <h3>Programming Languages</h3>
-          <ul>
-            {cvData.skills.programmingLanguages.map((lang, index) => (
-              <li key={index}>{lang}</li>
-            ))}
-          </ul>
-        </div>
-        <div>
-          <h3>Frameworks</h3>
-          <ul>
-            {cvData.skills.frameworks.map((framework, index) => (
-              <li key={index}>{framework}</li>
-            ))}
-          </ul>
-        </div>
-        </section>
-
-        <section className="languages">
-        <h2>Languages</h2>
-        <ul>
-          {Object.entries(cvData.languages).map(([lang, level]) => (
-            <li key={lang}>{lang}: {level}</li>
-          ))}
-        </ul>
-        </section>
-
-        <section className="hobbies">
-          <h2>Hobbies</h2>
-          <ul>
-            {cvData.Hobbies.map((hobby, index) => (
-              <li key={index}>{hobby}</li>
-            ))}
-          </ul>
-        </section>
-
-      </section>
-
-      <section className="main-info">
-
-        <section className="profile">
+        <section className="cv-section">
           <h2>Profile</h2>
           <p>{cvData.Profile}</p>
         </section>
-        
-        <section className="education">
-          <h2>Education</h2>
-          {Object.entries(cvData.Education).map(([period, edu]) => (
-            <div key={period} className="education-item">
-              <h3>{period}</h3>
-              <p><strong>{edu.institution}</strong></p>
-              <p>{edu.degree}</p>
-            </div>
-          ))}
-        </section>
 
-        <section className="work-experience">
+        <section className="cv-section">
           <h2>Work Experience</h2>
           {Object.entries(cvData.Work_experience).map(([position, work]) => (
-            <div key={position} className="work-item">
-              <h3>{work.period}</h3>
-              <p><strong>{position}</strong> at {work.company}</p>
+            <div key={position} className="cv-entry">
+              <p className="entry-meta">{work.period}</p>
+              <h3>{position}</h3>
+              <p className="entry-subtitle">{work.company}</p>
               <p>{work.description}</p>
             </div>
           ))}
         </section>
 
-        <section className="hackathons">
+        <section className="cv-section">
+          <h2>Education</h2>
+          {Object.entries(cvData.Education).map(([period, edu]) => (
+            <div key={period} className="cv-entry">
+              <p className="entry-meta">{period}</p>
+              <h3>{edu.institution}</h3>
+              <p className="entry-subtitle">{edu.degree}</p>
+            </div>
+          ))}
+        </section>
+
+        <section className="cv-section">
+          <h2>Skills</h2>
+          <p><strong>Programming Languages:</strong> {cvData.skills.programmingLanguages.join(', ')}</p>
+          <p><strong>Frameworks:</strong> {cvData.skills.frameworks.join(', ')}</p>
+        </section>
+
+        <section className="cv-section">
+          <h2>Languages</h2>
+          <ul>
+            {Object.entries(cvData.languages).map(([lang, level]) => (
+              <li key={lang}>
+                <strong>{lang}:</strong> {level}
+              </li>
+            ))}
+          </ul>
+        </section>
+
+        <section className="cv-section">
           <h2>Hackathons</h2>
           {Object.entries(cvData.Hackathons).map(([name, hackathon]) => (
-            <div key={name} className="hackathon-item">
+            <div key={name} className="cv-entry">
+              <p className="entry-meta">{hackathon.date}</p>
               <h3>{name}</h3>
-              <p>Date: {hackathon.date}</p>
               <p>{hackathon.description}</p>
             </div>
           ))}
         </section>
 
-        <section className="prizes">
+        <section className="cv-section">
           <h2>Prizes</h2>
           {Object.entries(cvData.Prizes).map(([name, prize]) => (
-            <div key={name} className="prize-item">
+            <div key={name} className="cv-entry">
+              <p className="entry-meta">{prize.date}</p>
               <h3>{name}</h3>
-              <p>Date: {prize.date}</p>
               <p>{prize.description}</p>
             </div>
           ))}
         </section>
 
-        <section className="degrees">
+        <section className="cv-section">
           <h2>Degrees & Certifications</h2>
           {Object.entries(cvData.Degrees).map(([name, degree]) => (
-            <div key={name} className="degree-item">
+            <div key={name} className="cv-entry">
+              <p className="entry-meta">{degree.date}</p>
               <h3>{name}</h3>
-              <p><strong>{degree.organization}</strong></p>
+              <p className="entry-subtitle">{degree.organization}</p>
               <p>{degree.degree}</p>
-              <p>Date: {degree.date}</p>
             </div>
           ))}
         </section>
 
-      </section>
-    </main>
+        <section className="cv-section">
+          <h2>Hobbies</h2>
+          <p>{cvData.Hobbies.join(', ')}</p>
+        </section>
+      </main>
     </>
   );
 }
