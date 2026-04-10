@@ -8,7 +8,12 @@ import { buildCvLatex } from './latexTemplate.js';
 
 const app = express();
 const PORT = Number(process.env.PORT || 3001);
-const PDFLATEX_TIMEOUT_MS = Number(process.env.PDFLATEX_TIMEOUT_MS || 30000);
+const DEFAULT_PDFLATEX_TIMEOUT_MS = 180000;
+const PDFLATEX_TIMEOUT_MS = Number(process.env.PDFLATEX_TIMEOUT_MS || DEFAULT_PDFLATEX_TIMEOUT_MS);
+
+function resolvePdflatexCommand() {
+  return process.env.PDFLATEX_PATH || 'pdflatex';
+}
 
 app.use(express.json({ limit: '1mb' }));
 
@@ -18,35 +23,46 @@ app.get('/api/health', (_req, res) => {
 
 function runPdflatex(workingDirectory, texFileName) {
   return new Promise((resolve, reject) => {
+    const pdflatexCommand = resolvePdflatexCommand();
     const args = ['-interaction=nonstopmode', '-halt-on-error', texFileName];
-    const process = spawn('pdflatex', args, { cwd: workingDirectory, windowsHide: true });
+    const childProcessEnv = {
+      ...process.env,
+      MIKTEX_NO_GUI: process.env.MIKTEX_NO_GUI || '1',
+      MIKTEX_AUTOINSTALL: process.env.MIKTEX_AUTOINSTALL || '1'
+    };
+
+    const childProcess = spawn(pdflatexCommand, args, {
+      cwd: workingDirectory,
+      windowsHide: true,
+      env: childProcessEnv
+    });
 
     let stdErrorOutput = '';
     let stdOutput = '';
 
     const timeout = setTimeout(() => {
-      process.kill('SIGTERM');
+      childProcess.kill('SIGTERM');
       reject(new Error('pdflatex timed out while compiling CV.'));
     }, PDFLATEX_TIMEOUT_MS);
 
-    process.stdout.on('data', (chunk) => {
+    childProcess.stdout.on('data', (chunk) => {
       stdOutput += chunk.toString();
     });
 
-    process.stderr.on('data', (chunk) => {
+    childProcess.stderr.on('data', (chunk) => {
       stdErrorOutput += chunk.toString();
     });
 
-    process.on('error', (error) => {
+    childProcess.on('error', (error) => {
       clearTimeout(timeout);
       if (error.code === 'ENOENT') {
-        reject(new Error('pdflatex was not found. Install a LaTeX distribution (TeX Live, MiKTeX, MacTeX) and ensure pdflatex is available on PATH.'));
+        reject(new Error('pdflatex was not found. Install a LaTeX distribution (TeX Live, MiKTeX, MacTeX), add pdflatex to PATH, or set PDFLATEX_PATH to the full pdflatex executable path.'));
         return;
       }
       reject(error);
     });
 
-    process.on('close', (code) => {
+    childProcess.on('close', (code) => {
       clearTimeout(timeout);
       if (code !== 0) {
         reject(new Error(`pdflatex failed with code ${code}. ${stdErrorOutput || stdOutput}`));
@@ -89,7 +105,11 @@ app.post('/api/render-pdf', async (req, res) => {
     const message = error instanceof Error ? error.message : 'Failed to generate PDF.';
     res.status(500).json({ error: message });
   } finally {
-    await fs.rm(jobDirectory, { recursive: true, force: true });
+    try {
+      await fs.rm(jobDirectory, { recursive: true, force: true });
+    } catch {
+      // Ignore cleanup failures (e.g., transient file locks on Windows).
+    }
   }
 });
 

@@ -93,19 +93,10 @@ export function buildCvLatex(cvData = {}) {
 \usepackage[utf8]{inputenc}
 \usepackage{lmodern}
 \usepackage{enumitem}
-\usepackage{xcolor}
-\usepackage{titlesec}
 \usepackage[hidelinks]{hyperref}
 \setlist[itemize]{leftmargin=*,topsep=2pt,itemsep=2pt}
 \setlength{\parindent}{0pt}
 \setlength{\parskip}{4pt}
-\definecolor{sectiongray}{HTML}{EDEDED}
-\titleformat{\section}
-  {\normalfont\large\bfseries}
-  {}
-  {0pt}
-  {\colorbox{sectiongray}{\parbox{\dimexpr\textwidth-2\fboxsep\relax}{\thesection\hspace{0pt}#1}}}
-\titlespacing*{\section}{0pt}{8pt}{6pt}
 \pagestyle{empty}
 
 \begin{document}
