@@ -58,7 +58,7 @@ export function LivePreview({ cvData, isLoading }) {
       }
     };
 
-    // Debounce the preview generation
+    // Debounce the preview generation - only re-generate if data significantly changed
     const timer = setTimeout(generatePreview, 1000);
     return () => clearTimeout(timer);
   }, [cvData, isLoading]);

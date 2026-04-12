@@ -5,12 +5,14 @@
 The frontend has been refactored into a modern 3-pane layout:
 
 ### Left Pane - Form Editor
+
 - Interactive form for editing CV data
 - Real-time validation with missing required fields highlighting
 - Displays all missing required fields at the bottom
 - Auto-syncs changes to the server session
 
 ### Center Pane - Live Preview
+
 - Real-time PDF preview that updates as you type
 - Debounced (1000ms) to avoid excessive recompilation
 - Shows LaTeX source code (collapsible)
@@ -18,6 +20,7 @@ The frontend has been refactored into a modern 3-pane layout:
 - Loading state with spinner
 
 ### Right Pane - AI Assistant Chat
+
 - Server-Sent Events (SSE) powered chat interface
 - Messages stream in real-time from the AI
 - Auto-updates CV data when assistant makes changes
@@ -89,6 +92,7 @@ The system validates CV data against defined required fields:
 - `Education` - At least one education entry
 
 Missing fields are:
+
 - Highlighted in the form editor
 - Listed in the "Missing Required Fields" section
 - Tracked in session state
@@ -133,6 +137,7 @@ User Input (Form) → handleFormUpdate
 ## Getting Started
 
 1. Start the development server:
+
    ```bash
    npm run dev
    ```

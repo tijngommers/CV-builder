@@ -24,7 +24,7 @@ export function useSession(initialData) {
         const data = await response.json();
         setSessionId(data.sessionId);
         setCvData(data.cvData);
-        setMissingFields(data.missingRequiredFields);
+        setMissingFields(data.missingRequiredFields || []);
         setRequiredFieldsComplete(data.requiredFieldsComplete);
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Session creation failed');
@@ -34,57 +34,69 @@ export function useSession(initialData) {
     };
 
     initSession();
-  }, [initialData]);
+  }, []);
 
-  const updateCvData = useCallback(async (updates) => {
-    if (!sessionId) return;
+  const updateCvData = useCallback(
+    async (newCvData) => {
+      if (!sessionId) {
+        // If no session yet, update local state
+        setCvData(newCvData);
+        return;
+      }
 
-    try {
-      // Optimistically update local state
-      const newCvData = { ...cvData, ...updates };
-      setCvData(newCvData);
+      try {
+        // Optimistically update local state
+        setCvData(newCvData);
 
-      // Fetch updated missing fields from server
-      const response = await fetch(`/api/sessions/${sessionId}/chat`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: '', updates })
-      });
+        // Send to server for validation and processing
+        const response = await fetch(`/api/sessions/${sessionId}/chat`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            message: '',
+            updates: newCvData
+          })
+        });
 
-      if (response.ok) {
-        // Parse SSE stream for final state
-        const reader = response.body.getReader();
-        const decoder = new TextDecoder();
-        let finalState = null;
+        if (response.ok) {
+          // Parse SSE stream for server response
+          const reader = response.body.getReader();
+          const decoder = new TextDecoder();
+          let buffer = '';
 
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
 
-          const chunk = decoder.decode(value);
-          const lines = chunk.split('\n');
+            buffer += decoder.decode(value, { stream: true });
+            const lines = buffer.split('\n');
+            buffer = lines[lines.length - 1];
 
-          for (const line of lines) {
-            if (line.startsWith('data: ')) {
-              try {
-                const data = JSON.parse(line.slice(6));
-                if (data.cv_data) finalState = data;
-              } catch (e) {
-                // Skip parse errors
+            // Process complete lines
+            for (let i = 0; i < lines.length - 1; i++) {
+              const line = lines[i];
+              if (line.startsWith('data: ')) {
+                try {
+                  const data = JSON.parse(line.slice(6));
+                  if (data.cv_data) {
+                    setCvData(data.cv_data);
+                  }
+                  if (data.missing_fields) {
+                    setMissingFields(data.missing_fields);
+                  }
+                } catch (e) {
+                  // Skip parse errors
+                }
               }
             }
           }
         }
-
-        if (finalState) {
-          setCvData(finalState.cv_data);
-          setMissingFields(finalState.missing_fields || []);
-        }
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Update failed');
       }
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Update failed');
-    }
-  }, [sessionId, cvData]);
+    },
+    [sessionId]
+  );
 
   return {
     sessionId,

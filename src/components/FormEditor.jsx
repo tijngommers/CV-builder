@@ -82,6 +82,28 @@ export function FormEditor({ cvData, onUpdate, missingFields }) {
             placeholder="Your address"
           />
         </div>
+
+        <div className="form-group">
+          <label htmlFor="linkedin">LinkedIn</label>
+          <input
+            id="linkedin"
+            type="url"
+            value={cvData.contact?.linkedin || ''}
+            onChange={(e) => handleInputChange('contact.linkedin', e.target.value)}
+            placeholder="https://linkedin.com/in/yourprofile"
+          />
+        </div>
+
+        <div className="form-group">
+          <label htmlFor="github">GitHub</label>
+          <input
+            id="github"
+            type="url"
+            value={cvData.contact?.github || ''}
+            onChange={(e) => handleInputChange('contact.github', e.target.value)}
+            placeholder="https://github.com/yourprofile"
+          />
+        </div>
       </div>
 
       <div className="form-section">

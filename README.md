@@ -19,11 +19,11 @@ Frontend CV renderer with a backend service that can:
 
 1. Node.js 18+
 1. A LaTeX distribution with `pdflatex` on PATH:
-    - Windows: MiKTeX or TeX Live
-    - macOS: MacTeX
-    - Linux: TeX Live
+   - Windows: MiKTeX or TeX Live
+   - macOS: MacTeX
+   - Linux: TeX Live
 1. Optional for upcoming LLM integration:
-    - `ANTHROPIC_API_KEY` for Claude-backed orchestration
+   - `ANTHROPIC_API_KEY` for Claude-backed orchestration
 
 Verify LaTeX installation:
 
@@ -32,9 +32,9 @@ Verify LaTeX installation:
 ## Development Setup
 
 1. Install dependencies:
-    - `npm install`
+   - `npm install`
 1. Run dev servers:
-    - `npm run dev`
+   - `npm run dev`
 
 This starts:
 
@@ -46,37 +46,37 @@ Vite proxies `/api/*` to backend during development.
 ## Test Setup
 
 1. Run tests:
-    - `npm test`
+   - `npm test`
 1. Test scope currently covers:
-    - strict required-field behavior in schema utilities
-    - chat stream contract (`text/event-stream` event sequence)
-    - LaTeX source endpoint payload format
+   - strict required-field behavior in schema utilities
+   - chat stream contract (`text/event-stream` event sequence)
+   - LaTeX source endpoint payload format
 
 ## Agent Contract (Chat + Render)
 
 Use this section as the implementation boundary for future agents touching chat/render behavior.
 
 - Run and validate:
-   - `npm run dev` to start client + server
-   - `npm test` to catch endpoint contract regressions
+  - `npm run dev` to start client + server
+  - `npm test` to catch endpoint contract regressions
 - Chat orchestration ownership:
-   - `server/services/chatOrchestrator.js` owns Claude + LangGraph orchestration
-   - `server/schemas/cvSchema.js` remains the single source of truth for normalize/update/required-field rules
+  - `server/services/chatOrchestrator.js` owns Claude + LangGraph orchestration
+  - `server/schemas/cvSchema.js` remains the single source of truth for normalize/update/required-field rules
 - SSE contract for `POST /api/sessions/:sessionId/chat` must stay stable:
-   - `user_message`
-   - `cv_data_updated`
-   - `assistant_message`
-   - `done`
+  - `user_message`
+  - `cv_data_updated`
+  - `assistant_message`
+  - `done`
 - Strictness guarantee:
-   - required-field completeness is determined by schema utilities, not model output
-   - `assistant_message.requiredFieldsComplete` must reflect schema-calculated status
+  - required-field completeness is determined by schema utilities, not model output
+  - `assistant_message.requiredFieldsComplete` must reflect schema-calculated status
 - Claude and graph configuration:
-   - `ANTHROPIC_API_KEY` enables live Claude calls
-   - `CLAUDE_MODEL` overrides model (default: `claude-3-5-haiku-latest`)
-   - `CLAUDE_MAX_TOKENS` controls response budget
+  - `ANTHROPIC_API_KEY` enables live Claude calls
+  - `CLAUDE_MODEL` overrides model (default: `claude-3-5-haiku-latest`)
+  - `CLAUDE_MAX_TOKENS` controls response budget
 - Failure behavior:
-   - SSE event names stay unchanged even on orchestration failure
-   - server falls back to deterministic required-field prompting when model call fails or key is missing
+  - SSE event names stay unchanged even on orchestration failure
+  - server falls back to deterministic required-field prompting when model call fails or key is missing
 
 ## API Contract
 
@@ -92,7 +92,7 @@ Creates a chat session and computes initial missing required fields.
 
 ```json
 {
-   "cvData": {}
+  "cvData": {}
 }
 ```
 
@@ -100,10 +100,10 @@ Creates a chat session and computes initial missing required fields.
 
 ```json
 {
-   "sessionId": "uuid",
-   "cvData": {},
-   "missingRequiredFields": ["personalInfo.name", "contact.email"],
-   "requiredFieldsComplete": false
+  "sessionId": "uuid",
+  "cvData": {},
+  "missingRequiredFields": ["personalInfo.name", "contact.email"],
+  "requiredFieldsComplete": false
 }
 ```
 
@@ -119,24 +119,24 @@ Streams one assistant turn as SSE.
 
 ```json
 {
-   "message": "Here is new information",
-   "updates": {
-      "contact": { "email": "me@example.com" }
-   }
+  "message": "Here is new information",
+  "updates": {
+    "contact": { "email": "me@example.com" }
+  }
 }
 ```
 
 - Response headers:
-   - `Content-Type: text/event-stream`
+  - `Content-Type: text/event-stream`
 
 - Event sequence contract (in order):
-   - `user_message`
-   - `cv_data_updated`
-   - `assistant_message`
-   - `done`
+  - `user_message`
+  - `cv_data_updated`
+  - `assistant_message`
+  - `done`
 
 - `assistant_message` payload always includes:
-   - `requiredFieldsComplete: boolean`
+  - `requiredFieldsComplete: boolean`
 
 ### `POST /api/latex-source`
 
@@ -146,7 +146,7 @@ Builds LaTeX source without compiling PDF.
 
 ```json
 {
-   "cvData": {}
+  "cvData": {}
 }
 ```
 
@@ -154,9 +154,9 @@ Builds LaTeX source without compiling PDF.
 
 ```json
 {
-   "latexSource": "\\documentclass...",
-   "missingRequiredFields": [],
-   "requiredFieldsComplete": true
+  "latexSource": "\\documentclass...",
+  "missingRequiredFields": [],
+  "requiredFieldsComplete": true
 }
 ```
 
@@ -186,4 +186,3 @@ This behavior is implemented in `server/schemas/cvSchema.js` and enforced during
 ## Production Build
 
 - `npm run build`
-
