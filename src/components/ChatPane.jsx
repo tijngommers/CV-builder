@@ -47,6 +47,7 @@ export function ChatPane({ sessionId, onDataUpdate, isLoading: parentLoading }) 
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
       let buffer = '';
+      let currentEvent = '';
 
       while (true) {
         const { done, value } = await reader.read();
@@ -57,17 +58,27 @@ export function ChatPane({ sessionId, onDataUpdate, isLoading: parentLoading }) 
         buffer = lines[lines.length - 1];
 
         for (let i = 0; i < lines.length - 1; i++) {
-          const line = lines[i];
+          const line = lines[i].trim();
+          if (!line) {
+            continue;
+          }
+
+          if (line.startsWith('event:')) {
+            currentEvent = line.slice(6).trim();
+            continue;
+          }
+
           if (line.startsWith('data:')) {
             try {
               const data = JSON.parse(line.slice(5).trim());
-              if (data.text) {
+              if (currentEvent === 'assistant_message' && data.text) {
                 assistantText += data.text;
               }
-              if (data.cv_data) {
-                onDataUpdate(data.cv_data);
+
+              if (currentEvent === 'cv_data_updated' && data.cvData) {
+                onDataUpdate(data.cvData, data.missingRequiredFields || []);
               }
-            } catch (e) {
+            } catch {
               // Skip parse errors
             }
           }

@@ -8,6 +8,12 @@ export function useSession(initialData) {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState(null);
 
+  const applyServerCvUpdate = useCallback((nextCvData, nextMissingFields = []) => {
+    setCvData(nextCvData);
+    setMissingFields(nextMissingFields);
+    setRequiredFieldsComplete(nextMissingFields.length === 0);
+  }, []);
+
   // Initialize session on component mount
   useEffect(() => {
     const initSession = async () => {
@@ -78,11 +84,12 @@ export function useSession(initialData) {
               if (line.startsWith('data: ')) {
                 try {
                   const data = JSON.parse(line.slice(6));
-                  if (data.cv_data) {
-                    setCvData(data.cv_data);
+                  if (data.cvData) {
+                    setCvData(data.cvData);
                   }
-                  if (data.missing_fields) {
-                    setMissingFields(data.missing_fields);
+                  if (data.missingRequiredFields) {
+                    setMissingFields(data.missingRequiredFields);
+                    setRequiredFieldsComplete(data.missingRequiredFields.length === 0);
                   }
                 } catch (e) {
                   // Skip parse errors
@@ -105,6 +112,7 @@ export function useSession(initialData) {
     requiredFieldsComplete,
     isLoading,
     error,
-    updateCvData
+    updateCvData,
+    applyServerCvUpdate
   };
 }

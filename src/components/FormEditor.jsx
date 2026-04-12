@@ -23,6 +23,9 @@ export function FormEditor({ cvData, onUpdate, missingFields }) {
 
   return (
     <div className="form-editor">
+      <div className="form-header">
+        <h2>Resume Information</h2>
+      </div>
       <div className="form-section">
         <h3>Personal Information</h3>
         <div className={`form-group ${highlightMissing('personalInfo.name')}`}>

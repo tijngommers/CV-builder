@@ -8,7 +8,7 @@
 
 .preview-header {
   padding: 16px 20px;
-  background: linear-gradient(135deg, var(--accent) 0%, var(--primary) 100%);
+  background: linear-gradient(135deg, var(--primary) 0%, var(--secondary) 100%);
   color: white;
   border-bottom: 1px solid var(--border);
   flex-shrink: 0;

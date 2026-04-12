@@ -9,11 +9,38 @@ const OrchestrationState = Annotation.Root({
   session: Annotation(),
   userMessage: Annotation(),
   updates: Annotation(),
+  extractedUpdates: Annotation(),
   cvData: Annotation(),
   missingRequiredFields: Annotation(),
   assistantText: Annotation(),
   timestamp: Annotation()
 });
+
+function isPlainObject(value) {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
+function mergeUpdates(base, incoming) {
+  if (!isPlainObject(base)) {
+    return isPlainObject(incoming) ? { ...incoming } : {};
+  }
+  if (!isPlainObject(incoming)) {
+    return { ...base };
+  }
+
+  const merged = { ...base };
+
+  Object.entries(incoming).forEach(([key, value]) => {
+    if (isPlainObject(value) && isPlainObject(merged[key])) {
+      merged[key] = mergeUpdates(merged[key], value);
+      return;
+    }
+
+    merged[key] = value;
+  });
+
+  return merged;
+}
 
 function getClaudeClient() {
   if (!process.env.ANTHROPIC_API_KEY) {
@@ -43,9 +70,134 @@ function getFallbackAssistantText(missingRequiredFields) {
   return 'Perfect. We now have all required information. I can continue refining your resume details and formatting.';
 }
 
+function extractJsonObjectFromText(text = '') {
+  const trimmed = typeof text === 'string' ? text.trim() : '';
+  if (!trimmed) {
+    return null;
+  }
+
+  const fencedMatch = trimmed.match(/```json\s*([\s\S]*?)```/i) || trimmed.match(/```\s*([\s\S]*?)```/i);
+  const candidate = fencedMatch ? fencedMatch[1].trim() : trimmed;
+
+  try {
+    const parsed = JSON.parse(candidate);
+    return isPlainObject(parsed) ? parsed : null;
+  } catch {
+    const firstBrace = candidate.indexOf('{');
+    const lastBrace = candidate.lastIndexOf('}');
+    if (firstBrace < 0 || lastBrace <= firstBrace) {
+      return null;
+    }
+
+    try {
+      const parsed = JSON.parse(candidate.slice(firstBrace, lastBrace + 1));
+      return isPlainObject(parsed) ? parsed : null;
+    } catch {
+      return null;
+    }
+  }
+}
+
+function getHeuristicUpdatesFromMessage(message = '') {
+  if (typeof message !== 'string' || !message.trim()) {
+    return {};
+  }
+
+  const updates = {};
+  const nameMatch = message.match(/(?:my name is|name\s*[:\-])\s*([^,.\n]+)/i);
+  const birthdateMatch = message.match(/(?:birthdate|date of birth|dob)\s*[:\-]?\s*([^,.\n]+)/i);
+  const emailMatch = message.match(/([A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,})/i);
+  const phoneMatch = message.match(/(?:phone|phonenumber|number|tel)\s*[:\-]?\s*([+()\d\s-]{7,})/i);
+  const addressMatch = message.match(/(?:address|adress)\s*[:\-]\s*([^\n]+)/i);
+  const linkedinMatch = message.match(/https?:\/\/(?:www\.)?linkedin\.com\/[^\s,]+/i);
+  const githubMatch = message.match(/https?:\/\/(?:www\.)?github\.com\/[^\s,]+/i);
+
+  if (nameMatch) {
+    updates.personalInfo = { ...(updates.personalInfo || {}), name: nameMatch[1].trim() };
+  }
+  if (birthdateMatch) {
+    updates.personalInfo = { ...(updates.personalInfo || {}), Birthdate: birthdateMatch[1].trim() };
+  }
+  if (emailMatch) {
+    updates.contact = { ...(updates.contact || {}), email: emailMatch[1].trim() };
+  }
+  if (phoneMatch) {
+    updates.contact = { ...(updates.contact || {}), phonenumber: phoneMatch[1].trim() };
+  }
+  if (addressMatch) {
+    updates.contact = { ...(updates.contact || {}), adress: addressMatch[1].trim() };
+  }
+  if (linkedinMatch) {
+    updates.contact = { ...(updates.contact || {}), linkedin: linkedinMatch[0].trim() };
+  }
+  if (githubMatch) {
+    updates.contact = { ...(updates.contact || {}), github: githubMatch[0].trim() };
+  }
+
+  return updates;
+}
+
+async function extractUpdatesNode(state) {
+  const userMessage = typeof state.userMessage === 'string' ? state.userMessage.trim() : '';
+  const incomingUpdates = isPlainObject(state.updates) ? state.updates : {};
+
+  if (!userMessage) {
+    return {
+      extractedUpdates: incomingUpdates
+    };
+  }
+
+  const claude = getClaudeClient();
+  if (!claude) {
+    return {
+      extractedUpdates: mergeUpdates(getHeuristicUpdatesFromMessage(userMessage), incomingUpdates)
+    };
+  }
+
+  try {
+    const response = await claude.messages.create({
+      model: CLAUDE_MODEL,
+      max_tokens: CLAUDE_MAX_TOKENS,
+      temperature: 0,
+      system: [
+        'Extract only CV field updates from the user message.',
+        'Return only strict JSON object and no markdown.',
+        'If no concrete field update exists, return {}.',
+        'Allowed keys: personalInfo.name, personalInfo.Birthdate, contact.phonenumber, contact.email, contact.adress, contact.linkedin, contact.github, Profile, skills.programmingLanguages, skills.frameworks, Work_experience, Education, Hobbies.'
+      ].join(' '),
+      messages: [
+        {
+          role: 'user',
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify({
+                userMessage,
+                currentCvData: normalizeCvData(state.session?.cvData || {}),
+                explicitUpdates: incomingUpdates
+              })
+            }
+          ]
+        }
+      ]
+    });
+
+    const modelText = extractTextFromClaudeResponse(response);
+    const parsedUpdates = extractJsonObjectFromText(modelText) || {};
+
+    return {
+      extractedUpdates: mergeUpdates(parsedUpdates, incomingUpdates)
+    };
+  } catch {
+    return {
+      extractedUpdates: mergeUpdates(getHeuristicUpdatesFromMessage(userMessage), incomingUpdates)
+    };
+  }
+}
+
 async function applyUpdatesNode(state) {
   const normalizedSessionData = normalizeCvData(state.session?.cvData || {});
-  const nextCvData = applyCvUpdates(normalizedSessionData, state.updates || {});
+  const nextCvData = applyCvUpdates(normalizedSessionData, state.extractedUpdates || state.updates || {});
   const missingRequiredFields = getMissingRequiredFields(nextCvData);
 
   return {
@@ -134,10 +286,12 @@ async function enforceRequiredFieldsNode(state) {
 }
 
 const assistantGraph = new StateGraph(OrchestrationState)
+  .addNode('extract_updates', extractUpdatesNode)
   .addNode('apply_updates', applyUpdatesNode)
   .addNode('draft_assistant_message', draftAssistantNode)
   .addNode('enforce_required_fields', enforceRequiredFieldsNode)
-  .addEdge(START, 'apply_updates')
+  .addEdge(START, 'extract_updates')
+  .addEdge('extract_updates', 'apply_updates')
   .addEdge('apply_updates', 'draft_assistant_message')
   .addEdge('draft_assistant_message', 'enforce_required_fields')
   .addEdge('enforce_required_fields', END)

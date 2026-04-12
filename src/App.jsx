@@ -1,4 +1,3 @@
-import { useState } from 'react';
 import { CV } from './data/initialData.mts';
 import { useSession } from './hooks/useSession';
 import { FormEditor } from './components/FormEditor';
@@ -7,16 +6,14 @@ import { ChatPane } from './components/ChatPane';
 import './App.css';
 
 function App() {
-  const { sessionId, cvData, missingFields, isLoading, updateCvData } = useSession(CV);
-  const [displayCvData, setDisplayCvData] = useState(cvData);
+  const { sessionId, cvData, missingFields, isLoading, updateCvData, applyServerCvUpdate } = useSession(CV);
 
   const handleFormUpdate = async (newCvData) => {
-    setDisplayCvData(newCvData);
     await updateCvData(newCvData);
   };
 
-  const handleChatDataUpdate = (newCvData) => {
-    setDisplayCvData(newCvData);
+  const handleChatDataUpdate = (newCvData, nextMissingFields) => {
+    applyServerCvUpdate(newCvData, nextMissingFields);
   };
 
   return (
@@ -29,12 +26,12 @@ function App() {
               <p>Loading session...</p>
             </div>
           ) : (
-            <FormEditor cvData={displayCvData} onUpdate={handleFormUpdate} missingFields={missingFields} />
+            <FormEditor cvData={cvData} onUpdate={handleFormUpdate} missingFields={missingFields} />
           )}
         </aside>
 
         <div className="pane center-pane">
-          <LivePreview cvData={displayCvData} isLoading={isLoading} />
+          <LivePreview cvData={cvData} isLoading={isLoading} />
         </div>
 
         <aside className="pane right-pane">
