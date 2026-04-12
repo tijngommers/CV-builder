@@ -5,13 +5,24 @@ import { validateLatexSyntax } from './latexValidator.js';
 const CLAUDE_MODEL = process.env.CLAUDE_MODEL || 'claude-opus-4-1-20250805';
 const CLAUDE_MAX_TOKENS = Number(process.env.CLAUDE_MAX_TOKENS || 2000);
 const CONTEXT_TURNS_LIMIT = 10;
+const ICON_COMMAND_REGEX = /\\fa[A-Z][a-zA-Z]*\*?/g;
 
-const BASELINE_LATEX_OUTLINE = String.raw`\documentclass{article}
+const BASELINE_LATEX_OUTLINE = String.raw`\documentclass[letterpaper,11pt]{article}
 \usepackage[empty]{fullpage}
+\usepackage{titlesec}
+\usepackage{enumitem}
+\usepackage[hidelinks]{hyperref}
+\usepackage{fontawesome5}
 \pagestyle{empty}
+\raggedright
 \begin{document}
+
+\begin{center}
+  	extbf{\Huge [Full Name]} \\
+  \small \faPhone* [Phone] \hspace{1pt}|\hspace{1pt} \faEnvelope [Email]
+\end{center}
+
 \section*{CONTACT}
-[Full Name]
 [Email] | [Phone] | [Location]
 
 \section*{SUMMARY}
@@ -68,6 +79,14 @@ function normalizeJsonPayload(text = '') {
 
 function hasResetIntent(userMessage = '') {
   return /(reset|rewrite|start over|from scratch|opnieuw|helemaal opnieuw)/i.test(userMessage);
+}
+
+function extractIconCommands(latexSource = '') {
+  if (!latexSource || typeof latexSource !== 'string') {
+    return new Set();
+  }
+
+  return new Set(latexSource.match(ICON_COMMAND_REGEX) || []);
 }
 
 function buildFallbackLatex(currentLatex, userMessage) {
@@ -133,7 +152,8 @@ async function draftLatexNode(state) {
       '1. PRESERVE the entire current resume document structure - DO NOT DELETE any existing content unless user explicitly asks for reset/rewrite.',
       '2. When user adds information, find the appropriate section and ADD to it (do not replace the whole document).',
       '3. Keep LaTeX structural anchors intact: \\documentclass, \\begin{document}, \\end{document}.',
-      '4. If current resume is incomplete/corrupt, use the baseline outline as structure and merge user-provided details.',
+      '4. Preserve icon-related commands if present: keep \\usepackage{fontawesome5}, \\faPhone, and \\faEnvelope unless user explicitly asks to remove icons.',
+      '5. If current resume is incomplete/corrupt, use the baseline outline as structure and merge user-provided details.',
       '5. Return output ONLY as valid JSON (nothing else before or after).',
       '6. JSON format: {"feedback": "what changed + suggested next info", "latex": "<complete LaTeX code>"}.',
       '',
@@ -223,6 +243,22 @@ async function validateLatexNode(state) {
   }
 
   if (previousLatex && !resetIntent) {
+    const previousIcons = extractIconCommands(previousLatex);
+    const candidateIcons = extractIconCommands(latexSource);
+    const missingIcons = [...previousIcons].filter((icon) => !candidateIcons.has(icon));
+
+    const previousHasFontAwesome = previousLatex.includes('\\usepackage{fontawesome5}');
+    const candidateHasFontAwesome = latexSource.includes('\\usepackage{fontawesome5}');
+
+    if ((previousHasFontAwesome && !candidateHasFontAwesome) || missingIcons.length > 0) {
+      return {
+        validationError: `Candidate LaTeX lost icon commands: ${missingIcons.join(', ') || 'fontawesome5 package removed'}.`,
+        latexSource: previousLatex,
+        feedback: 'I preserved your previous resume because icon formatting was removed in the generated update.',
+        shouldPersistLatex: false
+      };
+    }
+
     const shrinkRatio = previousLatex.length > 0 ? latexSource.length / previousLatex.length : 1;
     if (shrinkRatio < 0.7) {
       return {

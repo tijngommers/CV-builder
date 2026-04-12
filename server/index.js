@@ -65,7 +65,8 @@ app.get('/api/health', (_req, res) => {
 });
 
 app.post('/api/sessions', (req, res) => {
-  const session = createSession('');
+  const seedLatexSource = typeof req.body?.latexSource === 'string' ? req.body.latexSource : '';
+  const session = createSession(seedLatexSource);
 
   res.status(201).json({
     sessionId: session.id,

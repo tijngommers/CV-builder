@@ -1,5 +1,31 @@
 import { useCallback, useEffect, useState } from 'react';
 
+const SESSION_STORAGE_KEY = 'cv-builder-session-id';
+
+function getStoredSessionId() {
+  try {
+    return localStorage.getItem(SESSION_STORAGE_KEY);
+  } catch {
+    return null;
+  }
+}
+
+function setStoredSessionId(sessionId) {
+  try {
+    localStorage.setItem(SESSION_STORAGE_KEY, sessionId);
+  } catch {
+    // Ignore storage failures.
+  }
+}
+
+function clearStoredSessionId() {
+  try {
+    localStorage.removeItem(SESSION_STORAGE_KEY);
+  } catch {
+    // Ignore storage failures.
+  }
+}
+
 export function useSession(initialLatexSource = '') {
   const [sessionId, setSessionId] = useState(null);
   const [latexSource, setLatexSource] = useState(initialLatexSource);
@@ -13,9 +39,33 @@ export function useSession(initialLatexSource = '') {
     const initSession = async () => {
       setIsLoading(true);
       try {
+        const storedSessionId = getStoredSessionId();
+        if (storedSessionId) {
+          const restoreResponse = await fetch(`/api/sessions/${storedSessionId}`, {
+            method: 'GET',
+            headers: { 'Content-Type': 'application/json' }
+          });
+
+          if (restoreResponse.ok) {
+            const restored = await restoreResponse.json();
+            console.log('[useSession] Restored session:', restored.sessionId);
+            setSessionId(restored.sessionId);
+            setLatexSource(restored.latexSource || initialLatexSource || '');
+            setLatexHistory(restored.latexHistory || []);
+            setMessages(restored.messages || []);
+            setIsLoading(false);
+            return;
+          }
+
+          if (restoreResponse.status === 404) {
+            clearStoredSessionId();
+          }
+        }
+
         const response = await fetch('/api/sessions', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' }
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ latexSource: initialLatexSource })
         });
 
         if (!response.ok) throw new Error('Failed to create session');
@@ -23,6 +73,7 @@ export function useSession(initialLatexSource = '') {
         const data = await response.json();
         console.log('[useSession] Session created:', data.sessionId);
         setSessionId(data.sessionId);
+        setStoredSessionId(data.sessionId);
         // Use initial LaTeX if provided, otherwise use server's default
         setLatexSource(initialLatexSource || data.latexSource || '');
       } catch (err) {
@@ -50,6 +101,10 @@ export function useSession(initialLatexSource = '') {
         method: 'GET',
         headers: { 'Content-Type': 'application/json' }
       });
+
+      if (response.status === 404) {
+        clearStoredSessionId();
+      }
 
       if (!response.ok) throw new Error('Failed to fetch session');
 

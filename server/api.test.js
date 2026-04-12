@@ -20,6 +20,17 @@ test('POST /api/sessions creates a new session with latexSource', async () => {
   assert.equal(response.body.latexSource, '');
 });
 
+test('POST /api/sessions accepts optional latexSource seed', async () => {
+  const seededLatex = '\\documentclass{article}\\n\\usepackage{fontawesome5}\\n\\begin{document}\\n\\faPhone\\n\\end{document}';
+
+  const response = await request(app)
+    .post('/api/sessions')
+    .send({ latexSource: seededLatex });
+
+  assert.equal(response.status, 201);
+  assert.equal(response.body.latexSource, seededLatex);
+});
+
 test('GET /api/sessions/:sessionId returns session state', async () => {
   const created = await request(app).post('/api/sessions').send({});
   const sessionId = created.body.sessionId;
@@ -75,7 +86,18 @@ test('multi-turn updates preserve LaTeX header and document anchors', async () =
   process.env.ANTHROPIC_API_KEY = '';
 
   try {
-    const created = await request(app).post('/api/sessions').send({});
+    const iconSeed = String.raw`\documentclass[letterpaper,11pt]{article}
+\usepackage[empty]{fullpage}
+\usepackage{fontawesome5}
+\begin{document}
+\begin{center}
+\faPhone* (123) 456-7890 | \faEnvelope email@example.com
+\end{center}
+\section*{CONTACT}
+[Full Name]
+\end{document}`;
+
+    const created = await request(app).post('/api/sessions').send({ latexSource: iconSeed });
     const sessionId = created.body.sessionId;
 
     await request(app)
@@ -97,6 +119,9 @@ test('multi-turn updates preserve LaTeX header and document anchors', async () =
     assert.match(latexSource, /\\begin\{document\}/);
     assert.match(latexSource, /\\end\{document\}/);
     assert.match(latexSource, /CONTACT|Resume Draft|Full Name/);
+    assert.match(latexSource, /\\usepackage\{fontawesome5\}/);
+    assert.match(latexSource, /\\faPhone\*?/);
+    assert.match(latexSource, /\\faEnvelope/);
   } finally {
     process.env.ANTHROPIC_API_KEY = originalApiKey;
   }
