@@ -9,6 +9,7 @@ const OrchestrationState = Annotation.Root({
   session: Annotation(),
   userMessage: Annotation(),
   updates: Annotation(),
+  replaceMode: Annotation(),
   extractedUpdates: Annotation(),
   cvData: Annotation(),
   missingRequiredFields: Annotation(),
@@ -98,11 +99,12 @@ function extractJsonObjectFromText(text = '') {
   }
 }
 
-function getHeuristicUpdatesFromMessage(message = '') {
+function getHeuristicUpdatesFromMessage(message = '', currentCvData = {}) {
   if (typeof message !== 'string' || !message.trim()) {
     return {};
   }
 
+  const normalized = normalizeCvData(currentCvData);
   const updates = {};
   const nameMatch = message.match(/(?:my name is|name\s*[:\-])\s*([^,.\n]+)/i);
   const birthdateMatch = message.match(/(?:birthdate|date of birth|dob)\s*[:\-]?\s*([^,.\n]+)/i);
@@ -111,6 +113,18 @@ function getHeuristicUpdatesFromMessage(message = '') {
   const addressMatch = message.match(/(?:address|adress)\s*[:\-]\s*([^\n]+)/i);
   const linkedinMatch = message.match(/https?:\/\/(?:www\.)?linkedin\.com\/[^\s,]+/i);
   const githubMatch = message.match(/https?:\/\/(?:www\.)?github\.com\/[^\s,]+/i);
+  const addHobbyMatch = message.match(/(?:add hobby|hobby\s*[:\-])\s*([^,.\n]+)/i);
+  const removeHobbyMatch = message.match(/remove hobby\s*[:\-]?\s*([^,.\n]+)/i);
+  const addLanguageMatch = message.match(/add (?:programming )?language\s*[:\-]?\s*([^,.\n]+)/i);
+  const removeLanguageMatch = message.match(/remove (?:programming )?language\s*[:\-]?\s*([^,.\n]+)/i);
+  const addFrameworkMatch = message.match(/add framework\s*[:\-]?\s*([^,.\n]+)/i);
+  const removeFrameworkMatch = message.match(/remove framework\s*[:\-]?\s*([^,.\n]+)/i);
+  const removeWorkMatch = message.match(/remove work experience\s*[:\-]?\s*([^\n]+)/i);
+  const removeEducationMatch = message.match(/remove education\s*[:\-]?\s*([^\n]+)/i);
+  const removeHackathonMatch = message.match(/remove hackathon\s*[:\-]?\s*([^\n]+)/i);
+  const removePrizeMatch = message.match(/remove prize\s*[:\-]?\s*([^\n]+)/i);
+  const removeDegreeMatch = message.match(/remove (?:degree|certification)\s*[:\-]?\s*([^\n]+)/i);
+  const spokenLanguageMatch = message.match(/(?:i speak|language)\s+([^,.\n]+?)\s*(?:at|level)?\s*(native|fluent|basic|intermediate|advanced|a1|a2|b1|b2|c1|c2)?/i);
 
   if (nameMatch) {
     updates.personalInfo = { ...(updates.personalInfo || {}), name: nameMatch[1].trim() };
@@ -134,12 +148,109 @@ function getHeuristicUpdatesFromMessage(message = '') {
     updates.contact = { ...(updates.contact || {}), github: githubMatch[0].trim() };
   }
 
+  if (addHobbyMatch) {
+    const hobby = addHobbyMatch[1].trim();
+    if (hobby) {
+      const nextHobbies = [...normalized.Hobbies];
+      if (!nextHobbies.includes(hobby)) {
+        nextHobbies.push(hobby);
+      }
+      updates.Hobbies = nextHobbies;
+    }
+  }
+
+  if (removeHobbyMatch) {
+    const hobby = removeHobbyMatch[1].trim().toLowerCase();
+    updates.Hobbies = normalized.Hobbies.filter((item) => item.toLowerCase() !== hobby);
+  }
+
+  if (addLanguageMatch) {
+    const language = addLanguageMatch[1].trim();
+    if (language) {
+      const nextLanguages = [...normalized.skills.programmingLanguages];
+      if (!nextLanguages.includes(language)) {
+        nextLanguages.push(language);
+      }
+      updates.skills = { ...(updates.skills || {}), programmingLanguages: nextLanguages };
+    }
+  }
+
+  if (removeLanguageMatch) {
+    const language = removeLanguageMatch[1].trim().toLowerCase();
+    updates.skills = {
+      ...(updates.skills || {}),
+      programmingLanguages: normalized.skills.programmingLanguages.filter((item) => item.toLowerCase() !== language)
+    };
+  }
+
+  if (addFrameworkMatch) {
+    const framework = addFrameworkMatch[1].trim();
+    if (framework) {
+      const nextFrameworks = [...normalized.skills.frameworks];
+      if (!nextFrameworks.includes(framework)) {
+        nextFrameworks.push(framework);
+      }
+      updates.skills = { ...(updates.skills || {}), frameworks: nextFrameworks };
+    }
+  }
+
+  if (removeFrameworkMatch) {
+    const framework = removeFrameworkMatch[1].trim().toLowerCase();
+    updates.skills = {
+      ...(updates.skills || {}),
+      frameworks: normalized.skills.frameworks.filter((item) => item.toLowerCase() !== framework)
+    };
+  }
+
+  if (removeWorkMatch) {
+    const label = removeWorkMatch[1].trim();
+    updates.Work_experience = { ...(updates.Work_experience || {}), [label]: null };
+  }
+
+  if (removeEducationMatch) {
+    const label = removeEducationMatch[1].trim();
+    updates.Education = { ...(updates.Education || {}), [label]: null };
+  }
+
+  if (removeHackathonMatch) {
+    const label = removeHackathonMatch[1].trim();
+    updates.Hackathons = { ...(updates.Hackathons || {}), [label]: null };
+  }
+
+  if (removePrizeMatch) {
+    const label = removePrizeMatch[1].trim();
+    updates.Prizes = { ...(updates.Prizes || {}), [label]: null };
+  }
+
+  if (removeDegreeMatch) {
+    const label = removeDegreeMatch[1].trim();
+    updates.Degrees = { ...(updates.Degrees || {}), [label]: null };
+  }
+
+  if (spokenLanguageMatch) {
+    const languageName = spokenLanguageMatch[1]?.trim();
+    const level = spokenLanguageMatch[2]?.trim() || 'fluent';
+    if (languageName) {
+      updates.languages = {
+        ...(updates.languages || {}),
+        [languageName]: level
+      };
+    }
+  }
+
   return updates;
 }
 
 async function extractUpdatesNode(state) {
   const userMessage = typeof state.userMessage === 'string' ? state.userMessage.trim() : '';
   const incomingUpdates = isPlainObject(state.updates) ? state.updates : {};
+  const replaceMode = state.replaceMode === true;
+
+  if (replaceMode) {
+    return {
+      extractedUpdates: incomingUpdates
+    };
+  }
 
   if (!userMessage) {
     return {
@@ -150,7 +261,7 @@ async function extractUpdatesNode(state) {
   const claude = getClaudeClient();
   if (!claude) {
     return {
-      extractedUpdates: mergeUpdates(getHeuristicUpdatesFromMessage(userMessage), incomingUpdates)
+      extractedUpdates: mergeUpdates(getHeuristicUpdatesFromMessage(userMessage, state.session?.cvData || {}), incomingUpdates)
     };
   }
 
@@ -163,7 +274,10 @@ async function extractUpdatesNode(state) {
         'Extract only CV field updates from the user message.',
         'Return only strict JSON object and no markdown.',
         'If no concrete field update exists, return {}.',
-        'Allowed keys: personalInfo.name, personalInfo.Birthdate, contact.phonenumber, contact.email, contact.adress, contact.linkedin, contact.github, Profile, skills.programmingLanguages, skills.frameworks, Work_experience, Education, Hobbies.'
+        'Allowed keys: photo, personalInfo, contact, Profile, skills, languages, Hobbies, Work_experience, Education, Hackathons, Prizes, Degrees.',
+        'For arrays (for example Hobbies or skills arrays), return the full new array value when changing it.',
+        'To remove a specific object entry, set that entry key to null (for example Work_experience.{"Old Role": null}).',
+        'To remove scalar values, set the field to an empty string.'
       ].join(' '),
       messages: [
         {
@@ -190,14 +304,17 @@ async function extractUpdatesNode(state) {
     };
   } catch {
     return {
-      extractedUpdates: mergeUpdates(getHeuristicUpdatesFromMessage(userMessage), incomingUpdates)
+      extractedUpdates: mergeUpdates(getHeuristicUpdatesFromMessage(userMessage, state.session?.cvData || {}), incomingUpdates)
     };
   }
 }
 
 async function applyUpdatesNode(state) {
   const normalizedSessionData = normalizeCvData(state.session?.cvData || {});
-  const nextCvData = applyCvUpdates(normalizedSessionData, state.extractedUpdates || state.updates || {});
+  const replaceMode = state.replaceMode === true;
+  const nextCvData = replaceMode
+    ? normalizeCvData(state.extractedUpdates || {})
+    : applyCvUpdates(normalizedSessionData, state.extractedUpdates || state.updates || {});
   const missingRequiredFields = getMissingRequiredFields(nextCvData);
 
   return {
@@ -297,11 +414,12 @@ const assistantGraph = new StateGraph(OrchestrationState)
   .addEdge('enforce_required_fields', END)
   .compile();
 
-export async function buildAssistantTurn({ session, userMessage = '', updates = {} }) {
+export async function buildAssistantTurn({ session, userMessage = '', updates = {}, replaceMode = false }) {
   const finalState = await assistantGraph.invoke({
     session,
     userMessage,
-    updates
+    updates,
+    replaceMode
   });
 
   const now = finalState.timestamp || new Date().toISOString();

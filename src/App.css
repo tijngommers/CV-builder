@@ -49,7 +49,7 @@ body {
 
 .panes-layout {
   display: grid;
-  grid-template-columns: 320px 1fr 360px;
+  grid-template-columns: 420px 1fr 340px;
   grid-template-rows: 1fr;
   flex: 1;
   overflow: hidden;
@@ -145,13 +145,13 @@ body {
 /* Responsive Design */
 @media (max-width: 1600px) {
   .panes-layout {
-    grid-template-columns: 300px 1fr 340px;
+    grid-template-columns: 380px 1fr 320px;
   }
 }
 
 @media (max-width: 1200px) {
   .panes-layout {
-    grid-template-columns: 280px 1fr 320px;
+    grid-template-columns: 340px 1fr 300px;
     gap: 12px;
     padding: 12px;
   }

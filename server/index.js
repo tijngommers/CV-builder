@@ -80,6 +80,7 @@ app.post('/api/sessions/:sessionId/chat', async (req, res) => {
 
   const userMessage = typeof req.body?.message === 'string' ? req.body.message : '';
   const updates = req.body?.updates && typeof req.body.updates === 'object' ? req.body.updates : {};
+  const replaceMode = req.body?.replace === true;
 
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache, no-transform');
@@ -89,7 +90,8 @@ app.post('/api/sessions/:sessionId/chat', async (req, res) => {
     const assistantTurn = await buildAssistantTurn({
       session,
       userMessage,
-      updates
+      updates,
+      replaceMode
     });
 
     appendSessionMessage(sessionId, {

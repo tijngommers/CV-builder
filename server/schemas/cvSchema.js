@@ -29,7 +29,9 @@ export function normalizeCvData(input = {}) {
     contact: {
       phonenumber: typeof source.contact?.phonenumber === 'string' ? source.contact.phonenumber : '',
       email: typeof source.contact?.email === 'string' ? source.contact.email : '',
-      adress: typeof source.contact?.adress === 'string' ? source.contact.adress : ''
+      adress: typeof source.contact?.adress === 'string' ? source.contact.adress : '',
+      linkedin: typeof source.contact?.linkedin === 'string' ? source.contact.linkedin : '',
+      github: typeof source.contact?.github === 'string' ? source.contact.github : ''
     },
     skills: {
       programmingLanguages: toArray(source.skills?.programmingLanguages).map(String),
@@ -111,6 +113,11 @@ function mergeObjects(base, updates) {
   const merged = { ...base };
 
   Object.entries(updates).forEach(([key, value]) => {
+    if (value === null) {
+      delete merged[key];
+      return;
+    }
+
     if (isPlainObject(value) && isPlainObject(base[key])) {
       merged[key] = mergeObjects(base[key], value);
       return;

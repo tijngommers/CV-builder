@@ -60,7 +60,8 @@ export function useSession(initialData) {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             message: '',
-            updates: newCvData
+            updates: newCvData,
+            replace: true
           })
         });
 
