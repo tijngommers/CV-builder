@@ -1,102 +1,398 @@
-# CV Builder (React + LaTeX Resume Engine)
+# CV Builder
 
-Frontend CV renderer with a backend service that can:
+A modern, interactive CV/Resume builder with real-time LaTeX preview, AI-powered chat assistance, and PDF export.
 
-- compile CV data to PDF via `pdflatex`
-- return raw LaTeX source for preview/debugging
-- run a strict chat session contract that keeps requesting required fields until complete
+## ✨ Features
 
-## Architecture
+- **Real-time Preview**: Watch your CV update as you edit
+- **LaTeX-based**: Professional PDF output via pdflatex
+- **AI Chat Assistant**: Get help completing your CV using Claude AI
+- **Session Management**: Persistent editing sessions
+- **Responsive Design**: Works on desktop and tablet
+- **Social Links**: Include LinkedIn and GitHub profiles
+- **Form & Chat Modes**: Edit via form or natural language conversation
 
-- `src/`: React frontend
-- `server/index.js`: Express API
-- `server/latexTemplate.js`: CV JSON -> LaTeX template builder (source of truth)
-- `server/schemas/cvSchema.js`: CV normalization, required-field rules, update merging
-- `server/services/chatOrchestrator.js`: chat turn logic + SSE event payloads
-- `server/services/sessionStore.js`: in-memory chat/session state
+## 🚀 Quick Start
 
-## Prerequisites
+### Prerequisites
 
-1. Node.js 18+
-1. A LaTeX distribution with `pdflatex` on PATH:
-   - Windows: MiKTeX or TeX Live
-   - macOS: MacTeX
-   - Linux: TeX Live
-1. Optional for upcoming LLM integration:
-   - `ANTHROPIC_API_KEY` for Claude-backed orchestration
+- **Node.js** 18+ ([download](https://nodejs.org/))
+- **LaTeX Distribution** with `pdflatex`:
+  - **Windows**: [MiKTeX](https://miktex.org/) or [TeX Live](https://www.tug.org/texlive/)
+  - **macOS**: [MacTeX](https://www.tug.org/mactex/)
+  - **Linux**: `sudo apt-get install texlive-full` (Ubuntu/Debian)
 
-Verify LaTeX installation:
+### Verify LaTeX Installation
 
-- `pdflatex --version`
+```bash
+pdflatex --version
+```
 
-## Development Setup
+### Installation & Development
 
-1. Install dependencies:
-   - `npm install`
-1. Run dev servers:
-   - `npm run dev`
+```bash
+# Install dependencies
+npm install
+
+# Start development servers (client + server)
+npm run dev
+```
 
 This starts:
 
-- React app on Vite dev server
-- API server on `http://localhost:3001`
+- **Client**: React app at `http://localhost:5173` (Vite)
+- **Server**: API at `http://localhost:3001`
 
-Vite proxies `/api/*` to backend during development.
+### Production Build
 
-## Test Setup
+```bash
+npm run build     # Build frontend
+npm run preview   # Preview production build
+```
 
-1. Run tests:
-   - `npm test`
-1. Test scope currently covers:
-   - strict required-field behavior in schema utilities
-   - chat stream contract (`text/event-stream` event sequence)
-   - LaTeX source endpoint payload format
+## 📁 Project Structure
 
-## Agent Contract (Chat + Render)
+```
+cv-builder/
+├── src/                          # React frontend
+│   ├── components/              # React components
+│   │   ├── FormEditor.jsx      # CV form editor
+│   │   ├── ChatPane.jsx        # AI chat interface
+│   │   ├── LivePreview.jsx     # PDF preview
+│   │   └── ...
+│   ├── hooks/                  # Custom React hooks
+│   │   └── useSession.js       # Session management
+│   ├── data/
+│   │   └── initialData.mts     # Default CV data
+│   ├── App.jsx                 # Main app component
+│   └── main.jsx                # Vite entry point
+│
+├── server/                       # Node.js/Express backend
+│   ├── index.js                # Express server & routes
+│   ├── latexTemplate.js        # CV → LaTeX template engine
+│   ├── schemas/
+│   │   └── cvSchema.js         # CV data validation & normalization
+│   └── services/
+│       ├── chatOrchestrator.js # AI chat logic with LangGraph
+│       ├── sessionStore.js     # Session state management
+│       └── previewRenderer.js  # Queue & cache for previews
+│
+├── public/                       # Static assets
+├── package.json
+└── vite.config.js              # Vite configuration
+```
 
-Use this section as the implementation boundary for future agents touching chat/render behavior.
+## 🔌 API Reference
 
-- Run and validate:
-  - `npm run dev` to start client + server
-  - `npm test` to catch endpoint contract regressions
-- Chat orchestration ownership:
-  - `server/services/chatOrchestrator.js` owns Claude + LangGraph orchestration
-  - `server/schemas/cvSchema.js` remains the single source of truth for normalize/update/required-field rules
-- SSE contract for `POST /api/sessions/:sessionId/chat` must stay stable:
-  - `user_message`
-  - `cv_data_updated`
-  - `assistant_message`
-  - `done`
-- Strictness guarantee:
-  - required-field completeness is determined by schema utilities, not model output
-  - `assistant_message.requiredFieldsComplete` must reflect schema-calculated status
-- Claude and graph configuration:
-  - `ANTHROPIC_API_KEY` enables live Claude calls
-  - `CLAUDE_MODEL` overrides model (default: `claude-3-5-haiku-latest`)
-  - `CLAUDE_MAX_TOKENS` controls response budget
-- Failure behavior:
-  - SSE event names stay unchanged even on orchestration failure
-  - server falls back to deterministic required-field prompting when model call fails or key is missing
+### Session Management
 
-## API Contract
+#### `POST /api/sessions`
 
-### `GET /api/health`
+Create a new CV editing session.
 
-- Response: `{ "ok": true, "service": "cv-pdf-service" }`
-
-### `POST /api/sessions`
-
-Creates a chat session and computes initial missing required fields.
-
-- Request body:
+**Request:**
 
 ```json
 {
-  "cvData": {}
+  "cvData": {
+    /* Optional: initial CV data */
+  }
 }
 ```
 
-- Response:
+**Response:**
+
+```json
+{
+  "sessionId": "uuid",
+  "cvData": {
+    /* Normalized CV data */
+  },
+  "missingRequiredFields": ["personalInfo.name", "contact.email"],
+  "requiredFieldsComplete": false
+}
+```
+
+#### `GET /api/sessions/:sessionId`
+
+Retrieve current session data.
+
+**Response:**
+
+```json
+{
+  "sessionId": "uuid",
+  "createdAt": "2026-04-12T...",
+  "updatedAt": "2026-04-12T...",
+  "messages": [
+    /* Chat history */
+  ],
+  "cvData": {
+    /* Current CV data */
+  },
+  "missingRequiredFields": [],
+  "requiredFieldsComplete": true
+}
+```
+
+### Chat & Updates
+
+#### `POST /api/sessions/:sessionId/chat`
+
+Send a message to the AI assistant. Stream-based with Server-Sent Events.
+
+**Request:**
+
+```json
+{
+  "message": "Add my work experience at Google",
+  "updates": {
+    /* Optional: direct CV updates */
+  }
+}
+```
+
+**Events:**
+
+- `user_message`: User message echoed back
+- `cv_data_updated`: CV data changed
+- `assistant_message`: Assistant response
+- `done`: Stream complete
+
+### CV Rendering
+
+#### `POST /api/render-pdf`
+
+Render CV as PDF (attachment - download).
+
+**Request:**
+
+```json
+{
+  /* Full CV data object */
+}
+```
+
+**Response:**
+
+- Binary PDF file
+- Header: `Content-Disposition: attachment`
+
+#### `POST /api/render-preview`
+
+Render CV as PDF preview (inline - in-browser view).
+
+**Features:**
+
+- Queue limiting (max 3 concurrent compilations)
+- Cache keying (SHA-256 of CV data)
+- Compile diagnostics included
+- Response headers:
+  - `X-Cache-Key`: Hash of CV data
+  - `X-Cache-Hit`: true/false
+  - `X-Compilation-Exit-Code`: LaTeX exit code
+  - `X-Queue-Stats`: Queue metrics
+
+**Response:**
+
+- Binary PDF (inline)
+- Header: `Content-Disposition: inline`
+
+#### `GET /api/queue-stats`
+
+Get current preview queue statistics.
+
+**Response:**
+
+```json
+{
+  "activeCompilations": 1,
+  "queuedCompilations": 2,
+  "maxConcurrent": 3,
+  "cachedItems": 5
+}
+```
+
+### Utilities
+
+#### `POST /api/latex-source`
+
+Get raw LaTeX source for debugging/preview.
+
+**Request:**
+
+```json
+{
+  /* CV data */
+}
+```
+
+**Response:**
+
+```json
+{
+  "latexSource": "\\documentclass{article}...",
+  "missingRequiredFields": [],
+  "requiredFieldsComplete": true
+}
+```
+
+#### `GET /api/health`
+
+Health check endpoint.
+
+**Response:**
+
+```json
+{ "ok": true, "service": "cv-pdf-service" }
+```
+
+## 🔐 Environment Variables
+
+Create a `.env` file in the project root:
+
+```env
+# Server Configuration
+PORT=3001
+PDFLATEX_PATH=/usr/bin/pdflatex              # (Optional) Path to pdflatex
+PDFLATEX_TIMEOUT_MS=180000                   # Timeout for LaTeX compilation
+
+# AI Configuration (Optional)
+ANTHROPIC_API_KEY=sk-ant-...                 # Claude API key
+CLAUDE_MODEL=claude-3-5-haiku-latest        # Model selection
+CLAUDE_MAX_TOKENS=1024                       # Response token limit
+
+# Preview Rendering
+PREVIEW_MAX_CONCURRENT=3                     # Max concurrent compilations
+```
+
+Use `.env.example` as a template.
+
+## 📋 Required CV Fields
+
+To generate a complete CV, users must provide:
+
+1. **Personal Info**
+   - Full name
+   - Birthdate
+
+2. **Contact**
+   - Phone number
+   - Email address
+   - Address
+
+3. **Work Experience**
+   - At least one entry with: role, company, period, description
+
+4. **Education**
+   - At least one entry with: institution, degree
+
+5. **Profile**
+   - Professional summary
+
+Optional fields:
+
+- LinkedIn URL
+- GitHub URL
+- Skills (programming languages, frameworks)
+- Languages spoken
+- Hobbies
+- Hackathons
+- Prizes/Awards
+
+## 🧪 Testing
+
+```bash
+# Run all tests
+npm test
+
+# Test coverage includes:
+# - Schema validation and normalization
+# - Chat SSE event contract
+# - LaTeX generation
+```
+
+## 🛠️ Development
+
+### Key Technologies
+
+- **Frontend**: React 18, Vite 5, CSS3
+- **Backend**: Node.js, Express 4
+- **PDF Engine**: pdflatex (LaTeX)
+- **AI**: Anthropic Claude (optional)
+- **State Graph**: LangGraph
+
+### Code Organization
+
+- **Single Source of Truth**: `server/schemas/cvSchema.js` defines CV structure
+- **Reactive Preview**: Frontend automatically updates on CV changes
+- **Session Isolation**: Each session is independent with its own state
+- **SSE Streaming**: Real-time updates via Server-Sent Events
+
+### Adding Features
+
+1. **New CV Fields**: Update `server/schemas/cvSchema.js`
+2. **Form Fields**: Update `src/components/FormEditor.jsx`
+3. **LaTeX Rendering**: Update `server/latexTemplate.js`
+4. **Chat Logic**: Update `server/services/chatOrchestrator.js`
+
+## 🐛 Troubleshooting
+
+### "pdflatex: command not found"
+
+LaTeX is not installed or not in PATH.
+
+- Install LaTeX distribution (see Prerequisites)
+- Or set `PDFLATEX_PATH` environment variable:
+  ```bash
+  export PDFLATEX_PATH=/path/to/pdflatex
+  npm run dev
+  ```
+
+### "Chat not responding"
+
+Missing or invalid API key.
+
+- Set `ANTHROPIC_API_KEY` in `.env`
+- Fallback: Chat still works but uses deterministic prompting without Claude
+
+### "Vite dev server not proxying /api"
+
+Make sure backend server is running on port 3001.
+
+### "PDF generation timeout"
+
+LaTeX compilation taking too long.
+
+- Increase `PDFLATEX_TIMEOUT_MS`
+- Reduce CV content complexity
+
+## 📄 License
+
+MIT - See LICENSE file
+
+## 🤝 Contributing
+
+Contributions welcome! Please:
+
+1. Fork the repository
+2. Create a feature branch: `git checkout -b feature/your-feature`
+3. Make your changes
+4. Run tests: `npm test`
+5. Commit: `git commit -am 'Add your feature'`
+6. Push: `git push origin feature/your-feature`
+7. Submit a pull request
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for detailed guidelines.
+
+## 📞 Support
+
+- Issues: [GitHub Issues](https://github.com/yourusername/cv-builder/issues)
+- Discussions: [GitHub Discussions](https://github.com/yourusername/cv-builder/discussions)
+
+---
+
+**Built with ❤️ | CV Builder v0.1.0**
 
 ```json
 {
