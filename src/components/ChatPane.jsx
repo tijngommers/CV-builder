@@ -1,7 +1,7 @@
 import { useRef, useEffect, useState } from 'react';
 import './ChatPane.css';
 
-export function ChatPane({ sessionId, messages = [], isLoading: parentLoading, onMessageSent }) {
+export function ChatPane({ sessionId, messages = [], isLoading: parentLoading, onMessageSent, onResetSession }) {
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState(null);
@@ -116,6 +116,14 @@ export function ChatPane({ sessionId, messages = [], isLoading: parentLoading, o
     <div className="chat-pane">
       <div className="chat-header">
         <h2>Resume Assistant</h2>
+        <button
+          type="button"
+          className="chat-reset-btn"
+          onClick={onResetSession}
+          disabled={isLoading || parentLoading}
+        >
+          Restart Session
+        </button>
       </div>
 
       <div className="chat-messages">

@@ -117,6 +117,34 @@ export function useSession(initialLatexSource = '') {
     }
   }, [sessionId]);
 
+  const resetSession = useCallback(async () => {
+    setIsLoading(true);
+    setError(null);
+    clearStoredSessionId();
+
+    try {
+      const response = await fetch('/api/sessions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ latexSource: initialLatexSource })
+      });
+
+      if (!response.ok) throw new Error('Failed to create a new session');
+
+      const data = await response.json();
+      setSessionId(data.sessionId);
+      setStoredSessionId(data.sessionId);
+      setLatexSource(initialLatexSource || data.latexSource || '');
+      setLatexHistory([]);
+      setMessages([]);
+      console.log('[useSession] Session reset to new id:', data.sessionId);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to reset session');
+    } finally {
+      setIsLoading(false);
+    }
+  }, [initialLatexSource]);
+
   // Revert to a previous LaTeX version
   const revertToVersion = useCallback(
     async (historyIndex) => {
@@ -148,6 +176,7 @@ export function useSession(initialLatexSource = '') {
     isLoading,
     error,
     refreshSessionData,
-    revertToVersion
+    revertToVersion,
+    resetSession
   };
 }
