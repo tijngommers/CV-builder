@@ -2,14 +2,15 @@ import Anthropic from '@anthropic-ai/sdk';
 import { Annotation, END, START, StateGraph } from '@langchain/langgraph';
 import { validateLatexSyntax } from './latexValidator.js';
 
-const CLAUDE_MODEL = process.env.CLAUDE_MODEL || 'claude-3-5-haiku-latest';
-const CLAUDE_MAX_TOKENS = Number(process.env.CLAUDE_MAX_TOKENS || 800);
+const CLAUDE_MODEL = process.env.CLAUDE_MODEL || 'claude-opus-4-1-20250805';
+const CLAUDE_MAX_TOKENS = Number(process.env.CLAUDE_MAX_TOKENS || 2000);
 
 const OrchestrationState = Annotation.Root({
   session: Annotation(),
   userMessage: Annotation(),
   conversationHistory: Annotation(),
   latexSource: Annotation(),
+  feedback: Annotation(),
   validationError: Annotation(),
   timestamp: Annotation()
 });
@@ -37,6 +38,7 @@ async function draftLatexNode(state) {
   const claude = getClaudeClient();
   const userMessage = typeof state.userMessage === 'string' ? state.userMessage.trim() : '';
   const conversationHistory = Array.isArray(state.conversationHistory) ? state.conversationHistory : [];
+  const currentLatex = typeof state.session?.latexSource === 'string' ? state.session.latexSource : '';
 
   const messages = [
     ...conversationHistory.map((msg) => ({
@@ -59,43 +61,86 @@ async function draftLatexNode(state) {
 \\section*{Resume Draft}
 ${userMessage || 'Resume content placeholder.'}
 \\end{document}`,
-      timestamp: new Date().toISOString()
+      timestamp: new Date().toISOString(),
+      feedback: 'Using fallback (no API key set)'
     };
   }
 
   try {
     console.log('[chatOrchestrator] Calling Claude API - Model:', CLAUDE_MODEL, 'Tokens:', CLAUDE_MAX_TOKENS);
+    
+    const systemPrompt = [
+      'You are a professional resume writer and LaTeX expert.',
+      'Your task is to incrementally build a resume by preserving existing content and adding new information.',
+      '',
+      'ABSOLUTELY CRITICAL - YOU MUST FOLLOW THESE RULES:',
+      '1. PRESERVE the entire current resume document structure - DO NOT DELETE any existing content',
+      '2. When user adds information, find the appropriate section and ADD to it (do not replace)',
+      '3. Always return a COMPLETE LaTeX document with \\\\documentclass, \\\\begin{document}, and \\\\end{document}',
+      '4. Return output ONLY as valid JSON (nothing else before or after)',
+      '5. JSON format: {\"feedback\": \"what you added (1-2 sentences)\", \"latex\": \"<complete LaTeX code>\"}',
+      '6. IMPORTANT: Include ALL existing sections from the current resume, with new content added to relevant sections',
+      '',
+      'CURRENT RESUME (preserve and build upon this):',
+      '```',
+      currentLatex || '[Empty - will be created from user input]',
+      '```',
+      '',
+      'GOOD EXAMPLE:',
+      '{\"feedback\": \"Added name Tijn Gommers to contact section. Next, add education or work experience.\", \"latex\": \"\\\\documentclass{article}\\\\usepackage[empty]{fullpage}\\\\begin{document}\\\\section*{CONTACT}\\\\textbf{Tijn Gommers}\\\\section*{EXPERIENCE}\\\\textit{[TODO: Add work experience]}\\\\end{document}\"}',
+      '',
+      'BAD EXAMPLES (DO NOT DO THIS):',
+      '- Return plain text instead of JSON',
+      '- Return LaTeX outside the JSON value',
+      '- Delete existing content when adding new sections',
+      '- Forget the {\"feedback\": \"...\", \"latex\": \"...\"} wrapper'
+    ].join('\n');
+
     const response = await claude.messages.create({
       model: CLAUDE_MODEL,
       max_tokens: CLAUDE_MAX_TOKENS,
       temperature: 0.3,
-      system: [
-        'You are a professional resume writer and LaTeX expert.',
-        'Your task is to write complete, compilable LaTeX resume source code.',
-        '',
-        'CRITICAL RULES:',
-        '1. Always return a complete LaTeX document with \\documentclass, \\begin{document}, and \\end{document}',
-        '2. Preserve all resume structure sections (CONTACT, EXPERIENCE, EDUCATION, SKILLS, etc.) even if some are empty',
-        '3. For sections with missing user details, include TODO comments or placeholder text asking the user for more information',
-        '4. Never delete or skip sections - keep the document structure intact',
-        '5. Incrementally build the resume with each user message - add their information to the appropriate section',
-        '6. Return ONLY pure LaTeX code. No markdown. No explanations. No formatting instructions.',
-        '',
-        'Example structure to preserve:',
-        '\\documentclass[]{article}',
-        '\\begin{document}',
-        '\\section*{CONTACT} % Add contact details here',
-        '\\section*{EXPERIENCE} % Add work experience',
-        '\\section*{EDUCATION} % Add education entries',
-        '\\section*{SKILLS} % Add skills',
-        '\\end{document}'
-      ].join(' '),
+      system: systemPrompt,
       messages
     });
 
-    console.log('[chatOrchestrator] API success, LaTeX length:', extractTextFromClaudeResponse(response).length);
+    const fullResponse = extractTextFromClaudeResponse(response);
+    console.log('[chatOrchestrator] Raw Claude response (first 300 chars):', fullResponse.substring(0, 300));
+    
+    // Try to parse as JSON first
+    let feedback = 'Resume updated';
+    let latexSource = '';
+    
+    try {
+      const parsed = JSON.parse(fullResponse);
+      feedback = typeof parsed.feedback === 'string' ? parsed.feedback.trim() : 'Resume updated';
+      latexSource = typeof parsed.latex === 'string' ? parsed.latex.trim() : '';
+      console.log('[chatOrchestrator] ✓ JSON parsed successfully. Feedback:', feedback.substring(0, 100));
+    } catch (parseError) {
+      // Fallback: try text delimiter format
+      const parts = fullResponse.split('===LATEX===');
+      if (parts.length > 1) {
+        feedback = parts[0]?.trim() || 'Resume updated';
+        latexSource = parts[1]?.trim() || '';
+        console.log('[chatOrchestrator] ✓ Parsed as text delimiter format. Feedback:', feedback.substring(0, 100));
+      } else {
+        // Final fallback: first 150 chars as feedback, rest as LaTeX
+        const firstNewline = fullResponse.indexOf('\n');
+        if (firstNewline > 0) {
+          feedback = fullResponse.substring(0, Math.min(150, firstNewline)).trim();
+          latexSource = fullResponse.substring(firstNewline).trim();
+        } else {
+          latexSource = fullResponse;
+        }
+        console.log('[chatOrchestrator] ⚠ Using fallback parsing. Feedback:', feedback.substring(0, 100));
+      }
+    }
+    
+    console.log('[chatOrchestrator] API success. Feedback length:', feedback.length, 'LaTeX length:', latexSource.length);
+
     return {
-      latexSource: extractTextFromClaudeResponse(response),
+      latexSource: latexSource,
+      feedback: feedback,
       timestamp: new Date().toISOString()
     };
   } catch (error) {
@@ -106,8 +151,9 @@ ${userMessage || 'Resume content placeholder.'}
 \\pagestyle{empty}
 \\begin{document}
 \\section*{Error}
-Failed to generate LaTeX: ${error.message}
+Failed to generate LaTeX: ${error instanceof Error ? error.message : String(error)}
 \\end{document}`,
+      feedback: `Error: ${error instanceof Error ? error.message : String(error)}`,
       timestamp: new Date().toISOString()
     };
   }
@@ -127,13 +173,15 @@ async function validateLatexNode(state) {
   if (!validation.valid) {
     return {
       validationError: validation.errors?.join('; ') || 'LaTeX syntax error',
-      latexSource: ''
+      latexSource: '',
+      feedback: state.feedback || ''
     };
   }
 
   return {
     validationError: null,
-    latexSource
+    latexSource,
+    feedback: state.feedback || ''
   };
 }
 
@@ -161,6 +209,8 @@ export async function buildAssistantTurn({ session, userMessage = '' }) {
 
   const now = finalState.timestamp || new Date().toISOString();
   const hasError = Boolean(finalState.validationError);
+  
+  console.log('[buildAssistantTurn] Final state - feedback:', finalState.feedback?.substring(0, 80), 'latexLength:', finalState.latexSource?.length);
 
   const events = [
     {
@@ -185,7 +235,7 @@ export async function buildAssistantTurn({ session, userMessage = '' }) {
     events.push({
       type: 'assistant_message',
       payload: {
-        text: 'Resume updated. The live preview has been refreshed.',
+        text: finalState.feedback || 'Resume updated successfully',
         latexSource: finalState.latexSource,
         timestamp: now,
         isError: false

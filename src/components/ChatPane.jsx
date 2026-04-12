@@ -81,11 +81,11 @@ export function ChatPane({ sessionId, messages = [], isLoading: parentLoading, o
             try {
               const data = JSON.parse(line.slice(5).trim());
               if (currentEvent === 'assistant_message') {
-                if (typeof data.text === 'string' && data.text.trim()) {
-                  assistantText = data.text;
-                } else if (typeof data.latexSource === 'string' && data.latexSource.trim()) {
-                  assistantText = 'Resume updated. The live preview has been refreshed.';
+                // Always use the feedback text from server
+                if (typeof data.text === 'string') {
+                  assistantText = data.text.trim() || 'Processed (no feedback)';
                 }
+                console.log('[ChatPane] Received feedback:', assistantText.substring(0, 80));
               }
             } catch {
               // Skip parse errors

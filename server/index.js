@@ -5,6 +5,29 @@ import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import express from 'express';
+
+// Load .env file FIRST before importing other modules that use process.env
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const envPath = path.join(__dirname, '..', '.env');
+try {
+  const envContent = await fs.readFile(envPath, 'utf-8');
+  envContent.split('\n').forEach((line) => {
+    const trimmed = line.trim();
+    if (trimmed && !trimmed.startsWith('#')) {
+      const [key, ...valueParts] = trimmed.split('=');
+      const value = valueParts.join('=');
+      if (key && value) {
+        process.env[key.trim()] = value.trim();
+      }
+    }
+  });
+  console.log('[server-startup] Loaded .env file');
+} catch (err) {
+  console.warn('[server-startup] .env file not found or could not be read:', err.message);
+}
+
+// NOW import modules that depend on process.env
 import { buildAssistantTurn } from './services/chatOrchestrator.js';
 import { appendSessionMessage, createSession, getSession, updateLatexSource, revertLatexToVersion } from './services/sessionStore.js';
 
@@ -27,6 +50,13 @@ app.use((req, res, next) => {
   }
   next();
 });
+
+// Log API configuration at startup
+const apiKeyStatus = process.env.ANTHROPIC_API_KEY ? '✓ REAL API' : '⚠ FALLBACK MODE (no API key)';
+const claudeModel = process.env.CLAUDE_MODEL || 'claude-3-5-haiku-latest';
+console.log(`[server-startup] API Mode: ${apiKeyStatus}`);
+console.log(`[server-startup] Claude Model: ${claudeModel}`);
+console.log(`[server-startup] Server starting on port ${PORT}`);
 
 app.use(express.json({ limit: '1mb' }));
 
@@ -84,6 +114,12 @@ app.post('/api/sessions/:sessionId/chat', async (req, res) => {
       userMessage
     });
     console.log(`[chat] Success - LaTeX: ${assistantTurn.latexSource.length}`);
+    
+    // Log what feedback is being sent back
+    const feedbackEvent = assistantTurn.events.find((e) => e.type === 'assistant_message');
+    if (feedbackEvent?.payload?.text) {
+      console.log(`[chat] Sending feedback: "${feedbackEvent.payload.text.substring(0, 100)}..."`);
+    }
 
     // Append user message to session history
     appendSessionMessage(sessionId, {
