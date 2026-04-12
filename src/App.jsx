@@ -65,7 +65,7 @@ Welcome to CV Builder! Start chatting to build your resume. Tell me about your n
 \\end{document}`;
 
 function App() {
-  const { sessionId, latexSource, isLoading, refreshSessionData } = useSession(INITIAL_SAMPLE_LATEX);
+  const { sessionId, latexSource, messages, isLoading, refreshSessionData } = useSession(INITIAL_SAMPLE_LATEX);
 
   return (
     <div className="app-container">
@@ -81,7 +81,7 @@ function App() {
               <p>Loading session...</p>
             </div>
           ) : (
-            <ChatPane sessionId={sessionId} isLoading={isLoading} onMessageSent={refreshSessionData} />
+            <ChatPane sessionId={sessionId} messages={messages} isLoading={isLoading} onMessageSent={refreshSessionData} />
           )}
         </aside>
       </div>

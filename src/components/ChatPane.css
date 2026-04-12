@@ -36,6 +36,7 @@
   flex-direction: column;
   gap: var(--space-md);
   scroll-behavior: smooth;
+  min-height: 400px;
 }
 
 .chat-messages::-webkit-scrollbar {
@@ -186,22 +187,18 @@
   border-radius: 4px;
   color: var(--danger);
   font-size: var(--text-xs);
-  margin: 0 var(--space-lg);
-}
-
-.chat-input-area {
-  padding: var(--space-lg);
-  border-top: 1px solid var(--border);
-  background: var(--surface);
+  margin: 0;
   flex-shrink: 0;
-  height: 72px;
-  border-radius: 0 0 8px 8px;
 }
 
 .chat-input-form {
   display: flex;
   gap: var(--space-sm);
-  height: 100%;
+  padding: var(--space-lg);
+  border-top: 1px solid var(--border);
+  background: var(--surface);
+  flex-shrink: 0;
+  border-radius: 0 0 8px 8px;
 }
 
 .chat-input {

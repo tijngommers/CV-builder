@@ -5,6 +5,7 @@
 
 export function validateLatexSyntax(latexSource = '') {
   const errors = [];
+  const warnings = [];
 
   if (!latexSource || typeof latexSource !== 'string') {
     return { valid: false, errors: ['LaTeX source must be a non-empty string'] };
@@ -25,6 +26,10 @@ export function validateLatexSyntax(latexSource = '') {
     errors.push('Missing \\end{document}');
   }
 
+  // Check for resume structure preservation
+  const structureWarnings = validateResumeStructure(trimmed);
+  warnings.push(...structureWarnings);
+
   // Check bracket/brace nesting
   const bracketErrors = validateBracketBalance(trimmed);
   errors.push(...bracketErrors);
@@ -33,10 +38,18 @@ export function validateLatexSyntax(latexSource = '') {
   const environmentErrors = validateEnvironmentPairing(trimmed);
   errors.push(...environmentErrors);
 
-  return {
+  const result = {
     valid: errors.length === 0,
     errors: errors.length > 0 ? errors : undefined
   };
+
+  if (warnings.length > 0) {
+    result.warnings = warnings;
+    // Log warnings to console for debugging
+    warnings.forEach((w) => console.warn(`[LaTeX Validator] ${w}`));
+  }
+
+  return result;
 }
 
 function validateBracketBalance(latexSource) {
@@ -114,4 +127,27 @@ function validateEnvironmentPairing(latexSource) {
   }
 
   return errors;
+}
+
+function validateResumeStructure(latexSource) {
+  const warnings = [];
+  const sectionKeywords = ['CONTACT', 'EXPERIENCE', 'EDUCATION', 'SKILLS', 'SUMMARY'];
+
+  // Check if at least some resume sections are present
+  const hasSections = sectionKeywords.some((section) => latexSource.includes(section));
+
+  if (!hasSections) {
+    warnings.push('Resume appears to lack standard sections (CONTACT, EXPERIENCE, EDUCATION, SKILLS). Structure may be incomplete.');
+  }
+
+  // Check for emptiness in document body
+  const documentBodyMatch = latexSource.match(/\\begin\{document\}([\s\S]*?)\\end\{document\}/);
+  if (documentBodyMatch) {
+    const bodyContent = documentBodyMatch[1].trim();
+    if (bodyContent.length < 50) {
+      warnings.push('Resume content is very minimal. Consider adding more details about experience and education.');
+    }
+  }
+
+  return warnings;
 }

@@ -4,6 +4,7 @@ export function useSession(initialLatexSource = '') {
   const [sessionId, setSessionId] = useState(null);
   const [latexSource, setLatexSource] = useState(initialLatexSource);
   const [latexHistory, setLatexHistory] = useState([]);
+  const [messages, setMessages] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState(null);
 
@@ -35,7 +36,7 @@ export function useSession(initialLatexSource = '') {
     initSession();
   }, [initialLatexSource]);
 
-  // Fetch the latest session data (including updated latexSource)
+  // Fetch the latest session data (including updated latexSource and messages)
   const refreshSessionData = useCallback(async () => {
     if (!sessionId) return;
 
@@ -50,6 +51,7 @@ export function useSession(initialLatexSource = '') {
       const data = await response.json();
       setLatexSource(data.latexSource || '');
       setLatexHistory(data.latexHistory || []);
+      setMessages(data.messages || []);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to refresh session');
     }
@@ -81,6 +83,7 @@ export function useSession(initialLatexSource = '') {
   return {
     sessionId,
     latexSource,
+    messages,
     latexHistory,
     isLoading,
     error,

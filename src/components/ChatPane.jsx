@@ -1,11 +1,11 @@
 import { useRef, useEffect, useState } from 'react';
 import './ChatPane.css';
 
-export function ChatPane({ sessionId, isLoading: parentLoading, onMessageSent }) {
-  const [messages, setMessages] = useState([]);
+export function ChatPane({ sessionId, messages = [], isLoading: parentLoading, onMessageSent }) {
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState(null);
+  const [pendingMessage, setPendingMessage] = useState(null);
   const messagesEndRef = useRef(null);
 
   const scrollToBottom = () => {
@@ -14,29 +14,28 @@ export function ChatPane({ sessionId, isLoading: parentLoading, onMessageSent })
 
   useEffect(() => {
     scrollToBottom();
-  }, [messages]);
+  }, [messages, pendingMessage]);
 
   const handleSendMessage = async (e) => {
     e.preventDefault();
     if (!input.trim() || !sessionId || isLoading) return;
 
-    const userMessage = {
-      id: `user-${Date.now()}`,
-      role: 'user',
-      content: input,
-      timestamp: new Date().toISOString()
-    };
-
-    setMessages((prev) => [...prev, userMessage]);
+    const userMessageText = input;
     setInput('');
     setIsLoading(true);
     setError(null);
+    setPendingMessage({
+      id: `user-${Date.now()}`,
+      role: 'user',
+      content: userMessageText,
+      timestamp: new Date().toISOString()
+    });
 
     try {
       const response = await fetch(`/api/sessions/${sessionId}/chat`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: input })
+        body: JSON.stringify({ message: userMessageText })
       });
 
       if (!response.ok) {
@@ -85,17 +84,9 @@ export function ChatPane({ sessionId, isLoading: parentLoading, onMessageSent })
         }
       }
 
-      if (assistantText) {
-        const assistantMessage = {
-          id: `assistant-${Date.now()}`,
-          role: 'assistant',
-          content: assistantText,
-          timestamp: new Date().toISOString()
-        };
-        setMessages((prev) => [...prev, assistantMessage]);
-      }
+      setPendingMessage(null);
 
-      // Refresh session data to get the latest latexSource
+      // Refresh session data to get the latest messages and latexSource from server
       if (onMessageSent) {
         onMessageSent();
       }
@@ -103,6 +94,7 @@ export function ChatPane({ sessionId, isLoading: parentLoading, onMessageSent })
       const errorMessage = err instanceof Error ? err.message : 'Unknown error';
       setError(errorMessage);
       console.error('Chat error:', err);
+      setPendingMessage(null);
     } finally {
       setIsLoading(false);
     }
@@ -115,22 +107,35 @@ export function ChatPane({ sessionId, isLoading: parentLoading, onMessageSent })
       </div>
 
       <div className="chat-messages">
-        {messages.length === 0 ? (
+        {messages.length === 0 && !pendingMessage ? (
           <div className="chat-empty">
             <p>Tell me about your professional background to generate your resume</p>
           </div>
         ) : (
-          messages.map((msg) => (
-            <div key={msg.id} className={`chat-message ${msg.role}`}>
-              <div className="message-content">{msg.content}</div>
-              <div className="message-time">
-                {new Date(msg.timestamp).toLocaleTimeString([], {
-                  hour: '2-digit',
-                  minute: '2-digit'
-                })}
+          <>
+            {messages.map((msg) => (
+              <div key={msg.id} className={`chat-message ${msg.role}`}>
+                <div className="message-content">{msg.content}</div>
+                <div className="message-time">
+                  {new Date(msg.timestamp).toLocaleTimeString([], {
+                    hour: '2-digit',
+                    minute: '2-digit'
+                  })}
+                </div>
               </div>
-            </div>
-          ))
+            ))}
+            {pendingMessage && (
+              <div className={`chat-message ${pendingMessage.role}`}>
+                <div className="message-content">{pendingMessage.content}</div>
+                <div className="message-time">
+                  {new Date(pendingMessage.timestamp).toLocaleTimeString([], {
+                    hour: '2-digit',
+                    minute: '2-digit'
+                  })}
+                </div>
+              </div>
+            )}
+          </>
         )}
         {isLoading && (
           <div className="chat-message assistant loading">
