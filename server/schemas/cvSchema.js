@@ -20,6 +20,16 @@ function toArray(value) {
 export function normalizeCvData(input = {}) {
   const source = toRecord(input);
 
+  // Normalize custom sections
+  const customSections = toArray(source.customSections).map((section) => ({
+    name: typeof section?.name === 'string' ? section.name : 'Section',
+    contentType: section?.contentType === 'text' ? 'text' : 'list',
+    content:
+      section?.contentType === 'text' && typeof section?.content === 'string'
+        ? section.content
+        : toArray(section?.content).map(String)
+  }));
+
   return {
     photo: typeof source.photo === 'string' ? source.photo : '',
     personalInfo: {
@@ -44,7 +54,8 @@ export function normalizeCvData(input = {}) {
     Education: toRecord(source.Education),
     Hackathons: toRecord(source.Hackathons),
     Prizes: toRecord(source.Prizes),
-    Degrees: toRecord(source.Degrees)
+    Degrees: toRecord(source.Degrees),
+    customSections
   };
 }
 

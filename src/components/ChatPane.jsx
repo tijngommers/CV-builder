@@ -1,7 +1,7 @@
 import { useRef, useEffect, useState } from 'react';
 import './ChatPane.css';
 
-export function ChatPane({ sessionId, onDataUpdate, isLoading: parentLoading }) {
+export function ChatPane({ sessionId, isLoading: parentLoading, onMessageSent }) {
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -36,7 +36,7 @@ export function ChatPane({ sessionId, onDataUpdate, isLoading: parentLoading }) 
       const response = await fetch(`/api/sessions/${sessionId}/chat`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: input, updates: {} })
+        body: JSON.stringify({ message: input })
       });
 
       if (!response.ok) {
@@ -71,12 +71,13 @@ export function ChatPane({ sessionId, onDataUpdate, isLoading: parentLoading }) 
           if (line.startsWith('data:')) {
             try {
               const data = JSON.parse(line.slice(5).trim());
-              if (currentEvent === 'assistant_message' && data.text) {
+              // Handle both assistant messages (with text for chat display)
+              // and LaTeX updates (handled by useSession hook)
+              if (currentEvent === 'assistant_message' && data.text && !data.isError) {
                 assistantText += data.text;
               }
-
-              if (currentEvent === 'cv_data_updated' && data.cvData) {
-                onDataUpdate(data.cvData, data.missingRequiredFields || []);
+              if (currentEvent === 'assistant_message' && data.text && data.isError) {
+                assistantText = data.text;
               }
             } catch {
               // Skip parse errors
@@ -94,6 +95,11 @@ export function ChatPane({ sessionId, onDataUpdate, isLoading: parentLoading }) 
         };
         setMessages((prev) => [...prev, assistantMessage]);
       }
+
+      // Refresh session data to get the latest latexSource
+      if (onMessageSent) {
+        onMessageSent();
+      }
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'Unknown error';
       setError(errorMessage);
@@ -106,13 +112,13 @@ export function ChatPane({ sessionId, onDataUpdate, isLoading: parentLoading }) 
   return (
     <div className="chat-pane">
       <div className="chat-header">
-        <h2>AI Assistant</h2>
+        <h2>Resume Assistant</h2>
       </div>
 
       <div className="chat-messages">
         {messages.length === 0 ? (
           <div className="chat-empty">
-            <p>Start a conversation to get help filling out your CV</p>
+            <p>Tell me about your professional background to generate your resume</p>
           </div>
         ) : (
           messages.map((msg) => (
@@ -148,7 +154,7 @@ export function ChatPane({ sessionId, onDataUpdate, isLoading: parentLoading }) 
           type="text"
           value={input}
           onChange={(e) => setInput(e.target.value)}
-          placeholder="Ask me anything about your CV..."
+          placeholder="Tell me about your experience..."
           disabled={!sessionId || isLoading || parentLoading}
           className="chat-input"
         />

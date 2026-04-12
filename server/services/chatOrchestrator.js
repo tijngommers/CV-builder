@@ -1,47 +1,325 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { Annotation, END, START, StateGraph } from '@langchain/langgraph';
-import { applyCvUpdates, getFollowUpQuestion, getMissingRequiredFields, normalizeCvData } from '../schemas/cvSchema.js';
+import { validateLatexSyntax } from './latexValidator.js';
 
 const CLAUDE_MODEL = process.env.CLAUDE_MODEL || 'claude-3-5-haiku-latest';
-const CLAUDE_MAX_TOKENS = Number(process.env.CLAUDE_MAX_TOKENS || 360);
+const CLAUDE_MAX_TOKENS = Number(process.env.CLAUDE_MAX_TOKENS || 800);
 
 const OrchestrationState = Annotation.Root({
   session: Annotation(),
   userMessage: Annotation(),
-  updates: Annotation(),
-  replaceMode: Annotation(),
-  extractedUpdates: Annotation(),
-  cvData: Annotation(),
-  missingRequiredFields: Annotation(),
-  assistantText: Annotation(),
+  conversationHistory: Annotation(),
+  latexSource: Annotation(),
+  validationError: Annotation(),
   timestamp: Annotation()
 });
 
-function isPlainObject(value) {
-  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+function getClaudeClient() {
+  if (!process.env.ANTHROPIC_API_KEY) {
+    return null;
+  }
+
+  return new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 }
 
-function mergeUpdates(base, incoming) {
-  if (!isPlainObject(base)) {
-    return isPlainObject(incoming) ? { ...incoming } : {};
-  }
-  if (!isPlainObject(incoming)) {
-    return { ...base };
+function extractTextFromClaudeResponse(response) {
+  if (!response || !Array.isArray(response.content)) {
+    return '';
   }
 
-  const merged = { ...base };
+  return response.content
+    .filter((block) => block?.type === 'text' && typeof block.text === 'string')
+    .map((block) => block.text.trim())
+    .filter(Boolean)
+    .join('\n\n');
+}
 
-  Object.entries(incoming).forEach(([key, value]) => {
-    if (isPlainObject(value) && isPlainObject(merged[key])) {
-      merged[key] = mergeUpdates(merged[key], value);
-      return;
+/**
+ * Resume Schema Reference (for AI context)
+ * Used as an example of what resume sections should contain
+ */
+const RESUME_SCHEMA_REFERENCE = {
+  personalInfo: { name: 'string', birthdate: 'string' },
+  contact: { email: 'string', phone: 'string', address: 'string', linkedin: 'optional url', github: 'optional url' },
+  profile: 'brief professional summary',
+  skills: { programmingLanguages: 'array', frameworks: 'array' },
+  languages: 'record of language names to proficiency levels',
+  workExperience: 'record of role names to {company, period, description}',
+  education: 'record of period to {institution, degree}',
+  certifications: 'optional certifications or awards',
+  hobbies: 'optional list of interests'
+};
+
+/**
+ * LaTeX Template Example (for AI reference)
+ */
+const LATEX_TEMPLATE_EXAMPLE = String.raw`\documentclass[letterpaper,11pt]{article}
+
+\usepackage{latexsym}
+\usepackage[empty]{fullpage}
+\usepackage{titlesec}
+\usepackage[usenames,dvipsnames]{color}
+\usepackage{verbatim}
+\usepackage{enumitem}
+\usepackage[hidelinks]{hyperref}
+
+\definecolor{light-grey}{gray}{0.83}
+\definecolor{dark-grey}{gray}{0.3}
+\definecolor{text-grey}{gray}{.08}
+
+\pagestyle{empty}
+\raggedbottom
+\raggedright
+\setlength{\tabcolsep}{0in}
+
+\titleformat{\section}{
+    \bfseries \vspace{8pt} \raggedright \large
+}{}{0em}{}[\color{light-grey} {\titlerule[2pt]} \vspace{-4pt}]
+
+\newcommand{\resumeItem}[1]{\item\small{{#1 \vspace{-1pt}}}}
+\newcommand{\resumeSubheading}[4]{
+  \vspace{-1pt}\item
+    \begin{tabular*}{\textwidth}[t]{l@{\extracolsep{\fill}}r}
+      \textbf{#1} & {\color{dark-grey}\small #2}\\
+      \textit{#3} & {\color{dark-grey} \small #4}\\
+    \end{tabular*}\vspace{-4pt}
+}
+
+\newcommand{\resumeItemListStart}{\begin{itemize}}
+\newcommand{\resumeItemListEnd}{\end{itemize}\vspace{0pt}}
+\newcommand{\resumeSubHeadingListStart}{\begin{itemize}[leftmargin=0in, label={}]}
+\newcommand{\resumeSubHeadingListEnd}{\end{itemize}}
+
+\color{text-grey}
+\begin{document}
+
+\section{CONTACT}
+\begin{itemize}[leftmargin=0in, label={}]
+  \small{\item{
+    \textbf{Name} | \textbf{Email} | \textbf{Phone}
+  }}
+\end{itemize}
+
+\section{PROFESSIONAL SUMMARY}
+Brief description of professional background.
+
+\section{WORK EXPERIENCE}
+\resumeSubHeadingListStart
+  \resumeSubheading{Company}{2024-2025}{Job Title}{}
+    \resumeItemListStart
+      \resumeItem{Achievement or responsibility}
+    \resumeItemListEnd
+\resumeSubHeadingListEnd
+
+\section{EDUCATION}
+\resumeSubHeadingListStart
+  \resumeSubheading{University Name}{Graduation Year}{Degree Type}{}
+\resumeSubHeadingListEnd
+
+\section{SKILLS}
+\begin{itemize}[leftmargin=0in, label={}]
+  \small{\item{
+    \textbf{Languages:} Python, JavaScript, TypeScript \\
+    \textbf{Frameworks:} React, Node.js \\
+  }}
+\end{itemize}
+
+\end{document}`;
+
+async function draftLatexNode(state) {
+  const claude = getClaudeClient();
+  const userMessage = typeof state.userMessage === 'string' ? state.userMessage.trim() : '';
+  const conversationHistory = Array.isArray(state.conversationHistory) ? state.conversationHistory : [];
+
+  // Build conversation history for Claude
+  const messages = [
+    ...conversationHistory.map((msg) => ({
+      role: msg.role,
+      content: msg.content
+    })),
+    {
+      role: 'user',
+      content: userMessage
     }
+  ];
 
-    merged[key] = value;
+  if (!claude) {
+    // Fallback: basic LaTeX structure if API unavailable
+    return {
+      latexSource: `\\documentclass{article}
+\\usepackage[empty]{fullpage}
+\\pagestyle{empty}
+\\raggedbottom
+\\raggedright
+
+\\begin{document}
+
+\\section{Resume}
+User message: ${userMessage}
+
+This is a placeholder. Claude API unavailable.
+
+\\end{document}`,
+      timestamp: new Date().toISOString()
+    };
+  }
+
+  try {
+    const response = await claude.messages.create({
+      model: CLAUDE_MODEL,
+      max_tokens: CLAUDE_MAX_TOKENS,
+      temperature: 0.3,
+      system: [
+        'You are a professional resume writer and LaTeX expert.',
+        'Your task is to generate a complete, compilable LaTeX resume based on the user\'s input.',
+        '',
+        'IMPORTANT: Return ONLY the LaTeX source code. No explanations, no markdown, no commentary.',
+        'The LaTeX document MUST be complete and compilable (include \\documentclass, \\begin{document}, \\end{document}).',
+        '',
+        'Resume fields that typically appear (use as guidance):',
+        JSON.stringify(RESUME_SCHEMA_REFERENCE, null, 2),
+        '',
+        'Ask the user proactively for missing information:',
+        '- If they have not provided a name, ask "What is your full name?"',
+        '- If they have not provided contact info, ask "What email should I use?"',
+        '- If they do not have work experience listed, ask "Do you have any work experience to include?"',
+        '- For optional fields (GitHub, LinkedIn, certifications), ask "Do you have [field] to include?"',
+        '',
+        'When user adds information, incorporate it into the resume and regenerate the full LaTeX.',
+        'When user asks to change something, update that section and regenerate the full LaTeX.',
+        '',
+        'Example LaTeX structure (for reference only; customize based on user data):',
+        LATEX_TEMPLATE_EXAMPLE,
+        '',
+        'Ensure all special characters in content are LaTeX-escaped (e.g., _, &, %, $, #, {, }).'
+      ].join('\n'),
+      messages
+    });
+
+    const latexSource = extractTextFromClaudeResponse(response);
+
+    return {
+      latexSource,
+      timestamp: new Date().toISOString()
+    };
+  } catch (error) {
+    console.error('Claude API error:', error);
+    return {
+      latexSource: `\\documentclass{article}
+\\usepackage[empty]{fullpage}
+\\pagestyle{empty}
+
+\\begin{document}
+
+\\section{Error}
+Failed to generate LaTeX due to API error: ${error.message}
+
+\\end{document}`,
+      timestamp: new Date().toISOString()
+    };
+  }
+}
+
+async function validateLatexNode(state) {
+  const latexSource = typeof state.latexSource === 'string' ? state.latexSource : '';
+
+  if (!latexSource) {
+    return {
+      validationError: 'No LaTeX source generated',
+      latexSource: ''
+    };
+  }
+
+  const validation = validateLatexSyntax(latexSource);
+
+  if (!validation.valid) {
+    return {
+      validationError: validation.errors?.join('; ') || 'LaTeX syntax error',
+      latexSource: ''
+    };
+  }
+
+  return {
+    validationError: null,
+    latexSource
+  };
+}
+
+const orchestrationGraph = new StateGraph(OrchestrationState)
+  .addNode('draft_latex', draftLatexNode)
+  .addNode('validate_latex', validateLatexNode)
+  .addEdge(START, 'draft_latex')
+  .addEdge('draft_latex', 'validate_latex')
+  .addEdge('validate_latex', END)
+  .compile();
+
+export async function buildAssistantTurn({ session, userMessage = '' }) {
+  const conversationHistory = (session?.messages || []).map((msg) => ({
+    role: msg.role || 'user',
+    content: msg.content || ''
+  }));
+
+  const finalState = await orchestrationGraph.invoke({
+    session,
+    userMessage,
+    conversationHistory,
+    latexSource: '',
+    validationError: null
   });
 
-  return merged;
+  const now = finalState.timestamp || new Date().toISOString();
+  const hasError = Boolean(finalState.validationError);
+
+  const events = [
+    {
+      type: 'user_message',
+      payload: {
+        text: userMessage,
+        timestamp: now
+      }
+    }
+  ];
+
+  if (hasError) {
+    events.push({
+      type: 'assistant_message',
+      payload: {
+        text: `Error generating resume: ${finalState.validationError}`,
+        timestamp: now,
+        isError: true
+      }
+    });
+  } else {
+    events.push({
+      type: 'assistant_message',
+      payload: {
+        latexSource: finalState.latexSource,
+        timestamp: now
+      }
+    });
+  }
+
+  return {
+    latexSource: finalState.latexSource,
+    validationError: finalState.validationError,
+    events
+  };
 }
+import Anthropic from '@anthropic-ai/sdk';
+import { Annotation, END, START, StateGraph } from '@langchain/langgraph';
+import { validateLatexSyntax } from './latexValidator.js';
+
+const CLAUDE_MODEL = process.env.CLAUDE_MODEL || 'claude-3-5-haiku-latest';
+const CLAUDE_MAX_TOKENS = Number(process.env.CLAUDE_MAX_TOKENS || 800);
+
+const OrchestrationState = Annotation.Root({
+  session: Annotation(),
+  userMessage: Annotation(),
+  conversationHistory: Annotation(),
+  latexSource: Annotation(),
+  validationError: Annotation(),
+  timestamp: Annotation()
+});
 
 function getClaudeClient() {
   if (!process.env.ANTHROPIC_API_KEY) {

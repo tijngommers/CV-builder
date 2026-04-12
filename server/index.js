@@ -5,11 +5,8 @@ import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import express from 'express';
-import { buildCvLatex } from './latexTemplate.js';
 import { buildAssistantTurn } from './services/chatOrchestrator.js';
-import { appendSessionMessage, createSession, getSession, updateSession } from './services/sessionStore.js';
-import { getMissingRequiredFields, normalizeCvData } from './schemas/cvSchema.js';
-import { initializePreviewRenderer, renderPreview, generateCacheKey, getQueueStats } from './services/previewRenderer.js';
+import { appendSessionMessage, createSession, getSession, updateLatexSource, revertLatexToVersion } from './services/sessionStore.js';
 
 export const app = express();
 const PORT = Number(process.env.PORT || 3001);
@@ -20,12 +17,6 @@ function resolvePdflatexCommand() {
   return process.env.PDFLATEX_PATH || 'pdflatex';
 }
 
-// Initialize preview renderer with configuration
-initializePreviewRenderer({
-  maxConcurrentCompilations: Number(process.env.PREVIEW_MAX_CONCURRENT || 3),
-  pdflatexTimeoutMs: PDFLATEX_TIMEOUT_MS
-});
-
 app.use(express.json({ limit: '1mb' }));
 
 app.get('/api/health', (_req, res) => {
@@ -33,20 +24,12 @@ app.get('/api/health', (_req, res) => {
 });
 
 app.post('/api/sessions', (req, res) => {
-  const seedData = normalizeCvData(req.body?.cvData || {});
-  const missingRequiredFields = getMissingRequiredFields(seedData);
-  const session = createSession(seedData);
-
-  const initializedSession = updateSession(session.id, (current) => ({
-    ...current,
-    missingRequiredFields
-  }));
+  const session = createSession('');
 
   res.status(201).json({
-    sessionId: initializedSession.id,
-    cvData: initializedSession.cvData,
-    missingRequiredFields: initializedSession.missingRequiredFields,
-    requiredFieldsComplete: initializedSession.missingRequiredFields.length === 0
+    sessionId: session.id,
+    createdAt: session.createdAt,
+    latexSource: session.latexSource
   });
 });
 
@@ -63,9 +46,8 @@ app.get('/api/sessions/:sessionId', (req, res) => {
     createdAt: session.createdAt,
     updatedAt: session.updatedAt,
     messages: session.messages,
-    cvData: session.cvData,
-    missingRequiredFields: session.missingRequiredFields,
-    requiredFieldsComplete: session.missingRequiredFields.length === 0
+    latexSource: session.latexSource,
+    latexHistory: session.latexHistory
   });
 });
 
@@ -79,8 +61,6 @@ app.post('/api/sessions/:sessionId/chat', async (req, res) => {
   }
 
   const userMessage = typeof req.body?.message === 'string' ? req.body.message : '';
-  const updates = req.body?.updates && typeof req.body.updates === 'object' ? req.body.updates : {};
-  const replaceMode = req.body?.replace === true;
 
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache, no-transform');
@@ -89,29 +69,31 @@ app.post('/api/sessions/:sessionId/chat', async (req, res) => {
   try {
     const assistantTurn = await buildAssistantTurn({
       session,
-      userMessage,
-      updates,
-      replaceMode
+      userMessage
     });
 
+    // Append user message to session history
     appendSessionMessage(sessionId, {
       role: 'user',
       content: userMessage,
       timestamp: new Date().toISOString()
     });
 
-    updateSession(sessionId, (current) => ({
-      ...current,
-      cvData: assistantTurn.cvData,
-      missingRequiredFields: assistantTurn.missingRequiredFields
-    }));
+    // Update LaTeX source in session
+    updateLatexSource(sessionId, assistantTurn.latexSource, userMessage);
+
+    // Append assistant message to session history
+    const assistantText = assistantTurn.events
+      .find((event) => event.type === 'assistant_message')
+      ?.payload?.text || '';
 
     appendSessionMessage(sessionId, {
       role: 'assistant',
-      content: assistantTurn.events.find((event) => event.type === 'assistant_message')?.payload?.text || '',
+      content: assistantText,
       timestamp: new Date().toISOString()
     });
 
+    // Stream events back to client
     assistantTurn.events.forEach((event) => {
       res.write(`event: ${event.type}\n`);
       res.write(`data: ${JSON.stringify(event.payload)}\n\n`);
@@ -127,27 +109,10 @@ app.post('/api/sessions/:sessionId/chat', async (req, res) => {
     res.write('event: user_message\n');
     res.write(`data: ${JSON.stringify({ text: userMessage, timestamp })}\n\n`);
     res.write('event: assistant_message\n');
-    res.write(`data: ${JSON.stringify({ text: message, timestamp, requiredFieldsComplete: false })}\n\n`);
+    res.write(`data: ${JSON.stringify({ text: message, timestamp, isError: true })}\n\n`);
     res.write('event: done\n');
     res.write('data: {"ok":false}\n\n');
     res.end();
-  }
-});
-
-app.post('/api/latex-source', (req, res) => {
-  const cvData = normalizeCvData(req.body?.cvData || {});
-  const missingRequiredFields = getMissingRequiredFields(cvData);
-
-  try {
-    const latexSource = buildCvLatex(cvData);
-    res.json({
-      latexSource,
-      missingRequiredFields,
-      requiredFieldsComplete: missingRequiredFields.length === 0
-    });
-  } catch (error) {
-    const message = error instanceof Error ? error.message : 'Failed to generate LaTeX source.';
-    res.status(500).json({ error: message });
   }
 });
 
@@ -204,32 +169,26 @@ function runPdflatex(workingDirectory, texFileName) {
 }
 
 app.post('/api/render-pdf', async (req, res) => {
-  const cvData = req.body;
+  const latexSource = typeof req.body?.latexSource === 'string' ? req.body.latexSource : '';
 
-  if (!cvData || typeof cvData !== 'object') {
-    res.status(400).json({ error: 'Invalid request body. Expected CV JSON object.' });
+  if (!latexSource) {
+    res.status(400).json({ error: 'Invalid request body. Expected { latexSource: string }.' });
     return;
   }
 
-  const jobDirectory = await fs.mkdtemp(path.join(os.tmpdir(), 'cv-builder-'));
-  const baseName = `cv-${randomUUID()}`;
+  const jobDirectory = await fs.mkdtemp(path.join(os.tmpdir(), 'resume-builder-'));
+  const baseName = `resume-${randomUUID()}`;
   const texPath = path.join(jobDirectory, `${baseName}.tex`);
   const pdfPath = path.join(jobDirectory, `${baseName}.pdf`);
 
   try {
-    const latexSource = buildCvLatex(cvData);
     await fs.writeFile(texPath, latexSource, 'utf8');
-
     await runPdflatex(jobDirectory, `${baseName}.tex`);
 
     const pdfBuffer = await fs.readFile(pdfPath);
-    const safeName = (cvData?.personalInfo?.name || 'cv')
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, '-')
-      .replace(/^-+|-+$/g, '');
 
     res.setHeader('Content-Type', 'application/pdf');
-    res.setHeader('Content-Disposition', `attachment; filename="${safeName || 'cv'}.pdf"`);
+    res.setHeader('Content-Disposition', `attachment; filename="resume.pdf"`);
     res.send(pdfBuffer);
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Failed to generate PDF.';
@@ -238,67 +197,32 @@ app.post('/api/render-pdf', async (req, res) => {
     try {
       await fs.rm(jobDirectory, { recursive: true, force: true });
     } catch {
-      // Ignore cleanup failures (e.g., transient file locks on Windows).
+      // Ignore cleanup failures
     }
   }
 });
 
-app.post('/api/render-preview', async (req, res) => {
-  const cvData = normalizeCvData(req.body || {});
+app.delete('/api/sessions/:sessionId/history/:index', (req, res) => {
+  const sessionId = req.params.sessionId;
+  const historyIndex = parseInt(req.params.index, 10);
 
-  if (!cvData || typeof cvData !== 'object') {
-    res.status(400).json({ error: 'Invalid request body. Expected CV JSON object.' });
+  const session = getSession(sessionId);
+  if (!session) {
+    res.status(404).json({ error: 'Session not found.' });
     return;
   }
 
-  try {
-    // Generate LaTeX source
-    const latexSource = buildCvLatex(cvData);
-    const cacheKey = generateCacheKey(cvData);
-
-    // Render preview with queue management and caching
-    const result = await renderPreview({
-      latexSource,
-      cvData,
-      pdflatexPath: resolvePdflatexCommand(),
-      nameHint: cvData?.personalInfo?.name || 'cv'
-    });
-
-    // Read compiled PDF buffer
-    const pdfBuffer = await fs.readFile(result.pdfPath);
-
-    // Return PDF as inline preview (not attachment)
-    res.setHeader('Content-Type', 'application/pdf');
-    res.setHeader('Content-Disposition', 'inline; filename="preview.pdf"');
-    
-    // Include diagnostic headers
-    res.setHeader('X-Cache-Key', result.cacheKey);
-    res.setHeader('X-Cache-Hit', result.cached ? 'true' : 'false');
-    res.setHeader('X-Compilation-Exit-Code', String(result.diagnostics?.exitCode || 0));
-    res.setHeader('X-Queue-Stats', JSON.stringify(getQueueStats()));
-
-    // Send PDF buffer
-    res.send(pdfBuffer);
-  } catch (error) {
-    const err = error instanceof Error ? error : error.error;
-    const diagnostics = error.diagnostics || null;
-    const message = err instanceof Error ? err.message : 'Failed to generate preview.';
-    
-    res.status(500).json({
-      error: message,
-      cacheKey: generateCacheKey(cvData),
-      diagnostics: diagnostics ? {
-        exitCode: diagnostics.exitCode,
-        errorLines: diagnostics.stdError.slice(-10), // Last 10 error lines
-        outputLines: diagnostics.stdOutput.slice(-10) // Last 10 output lines
-      } : null,
-      queueStats: getQueueStats()
-    });
+  const reverted = revertLatexToVersion(sessionId, historyIndex);
+  if (!reverted) {
+    res.status(400).json({ error: 'Invalid history index or no history available.' });
+    return;
   }
-});
 
-app.get('/api/queue-stats', (_req, res) => {
-  res.json(getQueueStats());
+  res.json({
+    sessionId: reverted.id,
+    latexSource: reverted.latexSource,
+    latexHistory: reverted.latexHistory
+  });
 });
 
 export function startServer(port = PORT) {

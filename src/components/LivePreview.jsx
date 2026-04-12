@@ -1,39 +1,24 @@
 import { useEffect, useState } from 'react';
 import './LivePreview.css';
 
-export function LivePreview({ cvData, isLoading }) {
+export function LivePreview({ latexSource, isLoading }) {
   const [pdfUrl, setPdfUrl] = useState(null);
   const [previewError, setPreviewError] = useState(null);
   const [isGenerating, setIsGenerating] = useState(false);
-  const [latexSource, setLatexSource] = useState('');
 
   useEffect(() => {
     const generatePreview = async () => {
-      if (!cvData || isLoading) return;
+      if (!latexSource || isLoading) return;
 
       setIsGenerating(true);
       setPreviewError(null);
 
       try {
-        // Get LaTeX source
-        const latexResponse = await fetch('/api/latex-source', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ cvData })
-        });
-
-        if (!latexResponse.ok) {
-          throw new Error('Failed to generate LaTeX source');
-        }
-
-        const latexData = await latexResponse.json();
-        setLatexSource(latexData.latexSource);
-
-        // Generate PDF
+        // Generate PDF from LaTeX source
         const pdfResponse = await fetch('/api/render-pdf', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(cvData)
+          body: JSON.stringify({ latexSource })
         });
 
         if (!pdfResponse.ok) {
@@ -58,10 +43,10 @@ export function LivePreview({ cvData, isLoading }) {
       }
     };
 
-    // Debounce the preview generation - only re-generate if data significantly changed
-    const timer = setTimeout(generatePreview, 1000);
+    // Debounce the preview generation
+    const timer = setTimeout(generatePreview, 500);
     return () => clearTimeout(timer);
-  }, [cvData, isLoading]);
+  }, [latexSource, isLoading]);
 
   useEffect(() => {
     return () => {
@@ -108,13 +93,6 @@ export function LivePreview({ cvData, isLoading }) {
           </div>
         )}
       </div>
-
-      {latexSource && (
-        <details className="latex-source">
-          <summary>View LaTeX Source</summary>
-          <pre className="latex-code">{latexSource}</pre>
-        </details>
-      )}
     </div>
   );
 }
