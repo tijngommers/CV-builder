@@ -1,6 +1,6 @@
 {
   "name": "cv-builder",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Interactive CV/Resume builder with LaTeX rendering, real-time preview, and AI-powered chat assistance",
   "private": true,
   "type": "module",

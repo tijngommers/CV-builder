@@ -71,13 +71,12 @@ export function ChatPane({ sessionId, isLoading: parentLoading, onMessageSent })
           if (line.startsWith('data:')) {
             try {
               const data = JSON.parse(line.slice(5).trim());
-              // Handle both assistant messages (with text for chat display)
-              // and LaTeX updates (handled by useSession hook)
-              if (currentEvent === 'assistant_message' && data.text && !data.isError) {
-                assistantText += data.text;
-              }
-              if (currentEvent === 'assistant_message' && data.text && data.isError) {
-                assistantText = data.text;
+              if (currentEvent === 'assistant_message') {
+                if (typeof data.text === 'string' && data.text.trim()) {
+                  assistantText = data.text;
+                } else if (typeof data.latexSource === 'string' && data.latexSource.trim()) {
+                  assistantText = 'Resume updated. The live preview has been refreshed.';
+                }
               }
             } catch {
               // Skip parse errors

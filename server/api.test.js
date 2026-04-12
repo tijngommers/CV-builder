@@ -3,76 +3,104 @@ import assert from 'node:assert/strict';
 import request from 'supertest';
 import { app } from './index.js';
 
-const minimalCompleteCv = {
-  personalInfo: {
-    name: 'Tijn Gommers',
-    Birthdate: '16/07/2005'
-  },
-  contact: {
-    phonenumber: '+32123456789',
-    email: 'tijn@example.com',
-    adress: 'Leuven'
-  },
-  Profile: 'Computer science student focused on AI and product building.',
-  Work_experience: {
-    'PAL tutor': {
-      company: 'VTK Leuven',
-      period: '2025',
-      description: 'Tutored first-year students.'
-    }
-  },
-  Education: {
-    '2023-2026': {
-      institution: 'KU Leuven',
-      degree: 'Bachelor in Computer Science'
-    }
-  }
-};
+test('GET /api/health returns service status', async () => {
+  const response = await request(app).get('/api/health');
 
-test('POST /api/sessions initializes strict missing field state', async () => {
-  const response = await request(app)
-    .post('/api/sessions')
-    .send({ cvData: { personalInfo: { name: 'Tijn' } } });
-
-  assert.equal(response.status, 201);
-  assert.ok(response.body.sessionId);
-  assert.ok(Array.isArray(response.body.missingRequiredFields));
-  assert.equal(response.body.requiredFieldsComplete, false);
-  assert.ok(response.body.missingRequiredFields.includes('contact.email'));
+  assert.equal(response.status, 200);
+  assert.equal(response.body.ok, true);
+  assert.equal(response.body.service, 'cv-pdf-service');
 });
 
-test('SSE chat returns contract events and completion status', async () => {
-  const sessionResponse = await request(app)
-    .post('/api/sessions')
-    .send({ cvData: {} });
+test('POST /api/sessions creates a new session with latexSource', async () => {
+  const response = await request(app).post('/api/sessions').send({});
 
-  const sessionId = sessionResponse.body.sessionId;
+  assert.equal(response.status, 201);
+  assert.equal(typeof response.body.sessionId, 'string');
+  assert.equal(typeof response.body.createdAt, 'string');
+  assert.equal(response.body.latexSource, '');
+});
+
+test('GET /api/sessions/:sessionId returns session state', async () => {
+  const created = await request(app).post('/api/sessions').send({});
+  const sessionId = created.body.sessionId;
+
+  const response = await request(app).get(`/api/sessions/${sessionId}`);
+
+  assert.equal(response.status, 200);
+  assert.equal(response.body.sessionId, sessionId);
+  assert.equal(Array.isArray(response.body.messages), true);
+  assert.equal(Array.isArray(response.body.latexHistory), true);
+  assert.equal(typeof response.body.latexSource, 'string');
+});
+
+test('SSE chat returns user_message, assistant_message, and done events', async () => {
+  const created = await request(app).post('/api/sessions').send({});
+  const sessionId = created.body.sessionId;
 
   const response = await request(app)
     .post(`/api/sessions/${sessionId}/chat`)
     .set('Accept', 'text/event-stream')
-    .send({
-      message: 'Here are my details',
-      updates: minimalCompleteCv
-    });
+    .send({ message: 'Create a minimal software engineer resume in LaTeX.' });
 
   assert.equal(response.status, 200);
   assert.match(response.headers['content-type'], /text\/event-stream/);
   assert.match(response.text, /event: user_message/);
-  assert.match(response.text, /event: cv_data_updated/);
   assert.match(response.text, /event: assistant_message/);
   assert.match(response.text, /event: done/);
-  assert.match(response.text, /"requiredFieldsComplete":true/);
 });
 
-test('POST /api/latex-source returns latex payload and required field state', async () => {
-  const response = await request(app)
-    .post('/api/latex-source')
-    .send({ cvData: minimalCompleteCv });
+test('chat turn persists message history and latex source in session', async () => {
+  const created = await request(app).post('/api/sessions').send({});
+  const sessionId = created.body.sessionId;
 
-  assert.equal(response.status, 200);
-  assert.equal(typeof response.body.latexSource, 'string');
-  assert.match(response.body.latexSource, /\\documentclass/);
-  assert.equal(response.body.requiredFieldsComplete, true);
-  assert.deepEqual(response.body.missingRequiredFields, []);
+  await request(app)
+    .post(`/api/sessions/${sessionId}/chat`)
+    .set('Accept', 'text/event-stream')
+    .send({ message: 'Add contact section with email and phone.' });
+
+  const sessionResponse = await request(app).get(`/api/sessions/${sessionId}`);
+  assert.equal(sessionResponse.status, 200);
+
+  const { messages, latexSource } = sessionResponse.body;
+  assert.equal(Array.isArray(messages), true);
+  assert.equal(messages.length >= 2, true);
+  assert.equal(messages[0].role, 'user');
+  assert.equal(messages[1].role, 'assistant');
+  assert.equal(typeof latexSource, 'string');
+  assert.equal(latexSource.length > 0, true);
+});
+
+test('DELETE /api/sessions/:sessionId/history/:index reverts previous version', async () => {
+  const created = await request(app).post('/api/sessions').send({});
+  const sessionId = created.body.sessionId;
+
+  await request(app)
+    .post(`/api/sessions/${sessionId}/chat`)
+    .set('Accept', 'text/event-stream')
+    .send({ message: 'Add summary section.' });
+
+  await request(app)
+    .post(`/api/sessions/${sessionId}/chat`)
+    .set('Accept', 'text/event-stream')
+    .send({ message: 'Now add skills section.' });
+
+  const beforeRevert = await request(app).get(`/api/sessions/${sessionId}`);
+  assert.equal(beforeRevert.status, 200);
+  assert.equal(beforeRevert.body.latexHistory.length >= 1, true);
+
+  const revertResponse = await request(app).delete(`/api/sessions/${sessionId}/history/0`);
+  assert.equal(revertResponse.status, 200);
+  assert.equal(revertResponse.body.sessionId, sessionId);
+  assert.equal(typeof revertResponse.body.latexSource, 'string');
+  assert.equal(Array.isArray(revertResponse.body.latexHistory), true);
+});
+
+test('DELETE /api/sessions/:sessionId/history/:index returns 400 for invalid index', async () => {
+  const created = await request(app).post('/api/sessions').send({});
+  const sessionId = created.body.sessionId;
+
+  const response = await request(app).delete(`/api/sessions/${sessionId}/history/99`);
+
+  assert.equal(response.status, 400);
+  assert.match(response.body.error, /Invalid history index/);
 });

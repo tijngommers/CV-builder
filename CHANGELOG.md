@@ -5,6 +5,31 @@ All notable changes to the CV Builder project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.0] - 2026-04-12
+
+### Changed
+
+- Consolidated to a single chat-first LaTeX architecture (removed mixed form/schema branches).
+- Standardized SSE assistant payloads to always include a user-visible `text` message.
+- Simplified test suite to match implemented routes and runtime contracts.
+
+### Removed
+
+- Unused and stale modules:
+  - `src/hooks/useChat.js`
+  - `src/data/initialData.mts`
+  - `src/style/index.css`
+  - `server/latexTemplate.js`
+  - `server/schemas/cvSchema.js`
+  - `server/schemas/cvSchema.test.js`
+  - `server/services/previewRenderer.js`
+- Duplicate/legacy implementation block in `server/services/chatOrchestrator.js`.
+
+### Documentation
+
+- Rewrote `README.md`, `ARCHITECTURE.md`, and `CONTRIBUTING.md` to reflect current behavior only.
+- Removed references to non-existent endpoints and files.
+
 ## [0.1.0] - 2026-04-12
 
 ### Added
