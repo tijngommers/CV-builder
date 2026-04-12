@@ -1,45 +1,14 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { Annotation, END, START, StateGraph } from '@langchain/langgraph';
 import { validateLatexSyntax } from './latexValidator.js';
+import { DEFAULT_LATEX_TEMPLATE } from '../../shared/defaultLatexTemplate.js';
 
 const CLAUDE_MODEL = process.env.CLAUDE_MODEL || 'claude-opus-4-1-20250805';
 const CLAUDE_MAX_TOKENS = Number(process.env.CLAUDE_MAX_TOKENS || 2000);
 const CONTEXT_TURNS_LIMIT = 10;
 const ICON_COMMAND_REGEX = /\\fa[A-Z][a-zA-Z]*\*?/g;
 
-const BASELINE_LATEX_OUTLINE = String.raw`\documentclass[letterpaper,11pt]{article}
-\usepackage[empty]{fullpage}
-\usepackage{titlesec}
-\usepackage{enumitem}
-\usepackage[hidelinks]{hyperref}
-\usepackage{fontawesome5}
-\pagestyle{empty}
-\raggedright
-\begin{document}
-
-\begin{center}
-  	extbf{\Huge [Full Name]} \\
-  \small \faPhone* [Phone] \hspace{1pt}|\hspace{1pt} \faEnvelope [Email]
-\end{center}
-
-\section*{CONTACT}
-[Email] | [Phone] | [Location]
-
-\section*{SUMMARY}
-[Professional summary]
-
-\section*{EXPERIENCE}
-\textbf{Job Title} -- Company \hfill [Dates]
-\begin{itemize}
-  \item [Achievement or responsibility]
-\end{itemize}
-
-\section*{EDUCATION}
-\textbf{Degree} -- Institution \hfill [Dates]
-
-\section*{SKILLS}
-[Technical skills, tools, languages]
-\end{document}`;
+const BASELINE_LATEX_OUTLINE = DEFAULT_LATEX_TEMPLATE;
 
 const OrchestrationState = Annotation.Root({
   session: Annotation(),
@@ -196,10 +165,24 @@ async function draftLatexNode(state) {
     };
   } catch (error) {
     console.error('[chatOrchestrator] ERROR:', error instanceof Error ? error.message : String(error), 'Full:', error);
+
+    const message = error instanceof Error ? error.message : String(error);
+    const shouldFallback = /credit balance is too low|invalid_request_error|timeout|network|rate limit|429/i.test(message);
+
+    if (shouldFallback) {
+      return {
+        latexSource: buildFallbackLatex(currentLatex, userMessage),
+        feedback: 'API unavailable right now. I kept your structure and captured your request so you can continue editing.',
+        validationError: null,
+        timestamp: new Date().toISOString(),
+        shouldPersistLatex: true
+      };
+    }
+
     return {
       latexSource: currentLatex || BASELINE_LATEX_OUTLINE,
-      feedback: `Could not safely apply this update. Kept your previous resume unchanged. (${error instanceof Error ? error.message : String(error)})`,
-      validationError: error instanceof Error ? error.message : String(error),
+      feedback: `Could not safely apply this update. Kept your previous resume unchanged. (${message})`,
+      validationError: message,
       timestamp: new Date().toISOString(),
       shouldPersistLatex: false
     };
