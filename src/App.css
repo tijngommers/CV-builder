@@ -76,7 +76,7 @@ body {
 
 .panes-layout {
   display: grid;
-  grid-template-columns: 1.5fr 1fr;
+  grid-template-columns: minmax(0, 1fr) clamp(360px, 38vw, 520px);
   grid-template-rows: 1fr;
   flex: 1;
   width: 100%;
@@ -133,6 +133,7 @@ body {
   flex-direction: column;
   grid-column: 2;
   border-right: none;
+  min-width: 360px;
 }
 
 .loading-state {
@@ -174,13 +175,13 @@ body {
 /* Responsive Design */
 @media (max-width: 1600px) {
   .panes-layout {
-    grid-template-columns: 38% 62%;
+    grid-template-columns: minmax(0, 1fr) clamp(340px, 38vw, 500px);
   }
 }
 
 @media (max-width: 1200px) {
   .panes-layout {
-    grid-template-columns: 35% 65%;
+    grid-template-columns: minmax(0, 1fr) clamp(320px, 42vw, 460px);
     gap: 12px;
     padding: 12px;
   }
@@ -188,7 +189,7 @@ body {
 
 @media (max-width: 1024px) {
   .panes-layout {
-    grid-template-columns: 1fr 1fr;
+    grid-template-columns: minmax(0, 1fr) 360px;
     grid-template-rows: 1fr;
   }
 }
