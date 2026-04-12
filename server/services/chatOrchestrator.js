@@ -1,19 +1,160 @@
+import Anthropic from '@anthropic-ai/sdk';
+import { Annotation, END, START, StateGraph } from '@langchain/langgraph';
 import { applyCvUpdates, getFollowUpQuestion, getMissingRequiredFields, normalizeCvData } from '../schemas/cvSchema.js';
 
-export function buildAssistantTurn({ session, userMessage = '', updates = {} }) {
-  const normalizedSessionData = normalizeCvData(session.cvData);
-  const nextCvData = applyCvUpdates(normalizedSessionData, updates);
+const CLAUDE_MODEL = process.env.CLAUDE_MODEL || 'claude-3-5-haiku-latest';
+const CLAUDE_MAX_TOKENS = Number(process.env.CLAUDE_MAX_TOKENS || 360);
+
+const OrchestrationState = Annotation.Root({
+  session: Annotation(),
+  userMessage: Annotation(),
+  updates: Annotation(),
+  cvData: Annotation(),
+  missingRequiredFields: Annotation(),
+  assistantText: Annotation(),
+  timestamp: Annotation()
+});
+
+function getClaudeClient() {
+  if (!process.env.ANTHROPIC_API_KEY) {
+    return null;
+  }
+
+  return new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+}
+
+function extractTextFromClaudeResponse(response) {
+  if (!response || !Array.isArray(response.content)) {
+    return '';
+  }
+
+  return response.content
+    .filter((block) => block?.type === 'text' && typeof block.text === 'string')
+    .map((block) => block.text.trim())
+    .filter(Boolean)
+    .join('\n\n');
+}
+
+function getFallbackAssistantText(missingRequiredFields) {
+  if (missingRequiredFields.length) {
+    return getFollowUpQuestion(missingRequiredFields);
+  }
+
+  return 'Perfect. We now have all required information. I can continue refining your resume details and formatting.';
+}
+
+async function applyUpdatesNode(state) {
+  const normalizedSessionData = normalizeCvData(state.session?.cvData || {});
+  const nextCvData = applyCvUpdates(normalizedSessionData, state.updates || {});
   const missingRequiredFields = getMissingRequiredFields(nextCvData);
-
-  const assistantText = missingRequiredFields.length
-    ? getFollowUpQuestion(missingRequiredFields)
-    : 'Perfect. We now have all required information. I can continue refining your resume details and formatting.';
-
-  const now = new Date().toISOString();
 
   return {
     cvData: nextCvData,
     missingRequiredFields,
+    timestamp: new Date().toISOString()
+  };
+}
+
+async function draftAssistantNode(state) {
+  const claude = getClaudeClient();
+
+  if (!claude) {
+    return {
+      assistantText: getFallbackAssistantText(state.missingRequiredFields || [])
+    };
+  }
+
+  try {
+    const response = await claude.messages.create({
+      model: CLAUDE_MODEL,
+      max_tokens: CLAUDE_MAX_TOKENS,
+      temperature: 0.3,
+      system: [
+        'You are a CV assistant helping collect and refine resume information.',
+        'The required-field validation is authoritative and already computed for you.',
+        'When required fields are missing, keep your response concise and request only the next missing required field.',
+        'When required fields are complete, acknowledge completion and suggest the next improvement step.'
+      ].join(' '),
+      messages: [
+        {
+          role: 'user',
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify({
+                userMessage: state.userMessage || '',
+                cvData: state.cvData,
+                missingRequiredFields: state.missingRequiredFields,
+                nextRequiredQuestion: getFollowUpQuestion(state.missingRequiredFields || [])
+              })
+            }
+          ]
+        }
+      ]
+    });
+
+    const assistantText = extractTextFromClaudeResponse(response);
+
+    return {
+      assistantText: assistantText || getFallbackAssistantText(state.missingRequiredFields || [])
+    };
+  } catch {
+    return {
+      assistantText: getFallbackAssistantText(state.missingRequiredFields || [])
+    };
+  }
+}
+
+async function enforceRequiredFieldsNode(state) {
+  const missingRequiredFields = state.missingRequiredFields || [];
+  const fallbackQuestion = getFollowUpQuestion(missingRequiredFields);
+  const rawText = typeof state.assistantText === 'string' ? state.assistantText.trim() : '';
+
+  if (!missingRequiredFields.length) {
+    return {
+      assistantText: rawText || getFallbackAssistantText(missingRequiredFields)
+    };
+  }
+
+  if (!rawText) {
+    return {
+      assistantText: fallbackQuestion
+    };
+  }
+
+  if (rawText.includes(fallbackQuestion)) {
+    return {
+      assistantText: rawText
+    };
+  }
+
+  return {
+    assistantText: `${rawText}\n\n${fallbackQuestion}`
+  };
+}
+
+const assistantGraph = new StateGraph(OrchestrationState)
+  .addNode('apply_updates', applyUpdatesNode)
+  .addNode('draft_assistant_message', draftAssistantNode)
+  .addNode('enforce_required_fields', enforceRequiredFieldsNode)
+  .addEdge(START, 'apply_updates')
+  .addEdge('apply_updates', 'draft_assistant_message')
+  .addEdge('draft_assistant_message', 'enforce_required_fields')
+  .addEdge('enforce_required_fields', END)
+  .compile();
+
+export async function buildAssistantTurn({ session, userMessage = '', updates = {} }) {
+  const finalState = await assistantGraph.invoke({
+    session,
+    userMessage,
+    updates
+  });
+
+  const now = finalState.timestamp || new Date().toISOString();
+
+  return {
+    cvData: finalState.cvData,
+    missingRequiredFields: finalState.missingRequiredFields,
     events: [
       {
         type: 'user_message',
@@ -25,16 +166,16 @@ export function buildAssistantTurn({ session, userMessage = '', updates = {} }) 
       {
         type: 'cv_data_updated',
         payload: {
-          cvData: nextCvData,
-          missingRequiredFields
+          cvData: finalState.cvData,
+          missingRequiredFields: finalState.missingRequiredFields
         }
       },
       {
         type: 'assistant_message',
         payload: {
-          text: assistantText,
+          text: finalState.assistantText,
           timestamp: now,
-          requiredFieldsComplete: missingRequiredFields.length === 0
+          requiredFieldsComplete: finalState.missingRequiredFields.length === 0
         }
       }
     ]
