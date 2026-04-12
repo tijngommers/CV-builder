@@ -1,5 +1,6 @@
 /* ===== Design System ===== */
 :root {
+  /* Color Palette */
   --primary: #2563eb;
   --primary-hover: #1d4ed8;
   --primary-light: #eff6ff;
@@ -13,10 +14,34 @@
   --border: #e5e7eb;
   --text-primary: #111827;
   --text-secondary: #6b7280;
+  --surface: #ffffff;
+  --surface-alt: #f9fafb;
+  --border-subtle: #f3f4f6;
+  
+  /* Spacing Scale (8px base grid) */
+  --space-xs: 4px;
+  --space-sm: 8px;
+  --space-md: 12px;
+  --space-lg: 16px;
+  --space-xl: 20px;
+  --space-2xl: 24px;
+  --space-3xl: 32px;
+  
+  /* Typography Scale (16px root) */
+  --text-xs: 0.75rem;
+  --text-sm: 0.875rem;
+  --text-base: 1rem;
+  --text-lg: 1.125rem;
+  --text-xl: 1.5rem;
+  --text-2xl: 2rem;
+  
+  /* Shadows */
   --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
-  --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
-  --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
-  --shadow-xl: 0 20px 25px -5px rgba(0, 0, 0, 0.1);
+  --shadow-md: 0 2px 4px 0 rgba(0, 0, 0, 0.08);
+  --shadow-lg: 0 4px 8px 0 rgba(0, 0, 0, 0.1);
+  --shadow-xl: 0 8px 16px 0 rgba(0, 0, 0, 0.12);
+  
+  /* Transitions */
   --transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
@@ -33,17 +58,19 @@ html, body, #root {
 body {
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen', 'Ubuntu', 'Cantarell', sans-serif;
   color: var(--text-primary);
-  background: linear-gradient(135deg, #f9fafb 0%, #f3f4f6 100%);
+  background: var(--surface);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  line-height: 1.5;
 }
 
 /* App Component Styles */
 .app-container {
+  width: 100%;
   height: 100vh;
   display: flex;
   flex-direction: column;
-  background: linear-gradient(135deg, #f9fafb 0%, #f3f4f6 100%);
+  background: var(--surface);
   overflow: hidden;
 }
 
@@ -52,36 +79,38 @@ body {
   grid-template-columns: 1.5fr 1fr;
   grid-template-rows: 1fr;
   flex: 1;
-  overflow: hidden;
-  gap: 0;
+  width: 100%;
   height: 100%;
-  padding: 0;
+  overflow: hidden;
+  gap: 12px;
+  padding: 12px;
 }
 
 .pane {
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  background-color: white;
-  border-right: 1px solid var(--border);
-  transition: var(--transition);
+  background-color: var(--surface);
+  border-radius: 8px;
+  box-shadow: var(--shadow-sm);
   width: 100%;
   height: 100%;
 }
 
+.pane:last-child {
+  border-right: none;
+}
+
 .left-pane {
-  background: white;
+  background: var(--surface);
   overflow-y: auto;
+  overflow-x: hidden;
   scroll-behavior: smooth;
   grid-column: 1;
 }
 
-.right-pane {
-  grid-column: 2;
-}
-
 .left-pane::-webkit-scrollbar {
-  width: 6px;
+  width: 8px;
 }
 
 .left-pane::-webkit-scrollbar-track {
@@ -90,7 +119,7 @@ body {
 
 .left-pane::-webkit-scrollbar-thumb {
   background: var(--border);
-  border-radius: 3px;
+  border-radius: 4px;
 }
 
 .left-pane::-webkit-scrollbar-thumb:hover {
@@ -98,10 +127,11 @@ body {
 }
 
 .right-pane {
-  background: white;
+  background: var(--surface);
   overflow: hidden;
   display: flex;
   flex-direction: column;
+  grid-column: 2;
   border-right: none;
 }
 
@@ -111,14 +141,14 @@ body {
   align-items: center;
   justify-content: center;
   height: 100%;
-  gap: 1.5rem;
+  gap: var(--space-xl);
   color: var(--text-secondary);
-  padding: 2rem;
+  padding: var(--space-2xl);
   text-align: center;
 }
 
 .loading-state p {
-  font-size: 14px;
+  font-size: var(--text-base);
   font-weight: 500;
   letter-spacing: 0.5px;
 }
