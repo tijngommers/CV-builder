@@ -78,10 +78,12 @@ app.post('/api/sessions/:sessionId/chat', async (req, res) => {
   res.setHeader('Connection', 'keep-alive');
 
   try {
+    console.log(`[chat] Session ${sessionId}, message: "${userMessage.substring(0, 80)}..."`);
     const assistantTurn = await buildAssistantTurn({
       session,
       userMessage
     });
+    console.log(`[chat] Success - LaTeX: ${assistantTurn.latexSource.length}`);
 
     // Append user message to session history
     appendSessionMessage(sessionId, {
@@ -115,8 +117,7 @@ app.post('/api/sessions/:sessionId/chat', async (req, res) => {
     res.end();
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Failed to orchestrate assistant response.';
-    const timestamp = new Date().toISOString();
-
+    const timestamp = new Date().toISOString();    console.error(`[chat] ERROR Session ${sessionId}:`, message, error);
     res.write('event: user_message\n');
     res.write(`data: ${JSON.stringify({ text: userMessage, timestamp })}\n\n`);
     res.write('event: assistant_message\n');

@@ -50,6 +50,7 @@ async function draftLatexNode(state) {
   ];
 
   if (!claude) {
+    console.warn('[chatOrchestrator] No API key - using fallback');
     return {
       latexSource: `\\documentclass{article}
 \\usepackage[empty]{fullpage}
@@ -63,6 +64,7 @@ ${userMessage || 'Resume content placeholder.'}
   }
 
   try {
+    console.log('[chatOrchestrator] Calling Claude API - Model:', CLAUDE_MODEL, 'Tokens:', CLAUDE_MAX_TOKENS);
     const response = await claude.messages.create({
       model: CLAUDE_MODEL,
       max_tokens: CLAUDE_MAX_TOKENS,
@@ -91,11 +93,13 @@ ${userMessage || 'Resume content placeholder.'}
       messages
     });
 
+    console.log('[chatOrchestrator] API success, LaTeX length:', extractTextFromClaudeResponse(response).length);
     return {
       latexSource: extractTextFromClaudeResponse(response),
       timestamp: new Date().toISOString()
     };
   } catch (error) {
+    console.error('[chatOrchestrator] ERROR:', error instanceof Error ? error.message : String(error), 'Full:', error);
     return {
       latexSource: `\\documentclass{article}
 \\usepackage[empty]{fullpage}

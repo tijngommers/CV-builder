@@ -32,14 +32,18 @@ export function ChatPane({ sessionId, messages = [], isLoading: parentLoading, o
     });
 
     try {
+      console.log('[ChatPane] Sending msg:', userMessageText.substring(0, 80));
       const response = await fetch(`/api/sessions/${sessionId}/chat`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ message: userMessageText })
       });
 
+      console.log('[ChatPane] Status:', response.status);
       if (!response.ok) {
-        throw new Error('Failed to send message');
+        const errText = await response.text();
+        console.error('[ChatPane] HTTP Error:', response.status, errText.substring(0, 200));
+        throw new Error(`HTTP ${response.status}: ${errText.substring(0, 100)}`);
       }
 
       let assistantText = '';
@@ -86,14 +90,16 @@ export function ChatPane({ sessionId, messages = [], isLoading: parentLoading, o
 
       setPendingMessage(null);
 
+      console.log('[ChatPane] Request succeeded');
       // Refresh session data to get the latest messages and latexSource from server
       if (onMessageSent) {
+        console.log('[ChatPane] Calling refresh...');
         onMessageSent();
       }
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'Unknown error';
+      console.error('[ChatPane] ERROR:', errorMessage, err);
       setError(errorMessage);
-      console.error('Chat error:', err);
       setPendingMessage(null);
     } finally {
       setIsLoading(false);
