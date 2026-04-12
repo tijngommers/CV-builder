@@ -8,6 +8,8 @@ export function ChatPane({ sessionId, messages = [], isLoading: parentLoading, o
   const [pendingMessage, setPendingMessage] = useState(null);
   const messagesEndRef = useRef(null);
 
+  console.log('[ChatPane] Received sessionId:', sessionId);
+
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   };
@@ -18,7 +20,11 @@ export function ChatPane({ sessionId, messages = [], isLoading: parentLoading, o
 
   const handleSendMessage = async (e) => {
     e.preventDefault();
-    if (!input.trim() || !sessionId || isLoading) return;
+    console.log('[ChatPane] Attempting to send message. sessionId:', sessionId, 'input:', input.length > 0);
+    if (!input.trim() || !sessionId || isLoading) {
+      console.log('[ChatPane] Validation failed: trim=' + input.trim().length + ', sessionId=' + Boolean(sessionId) + ', isLoading=' + isLoading);
+      return;
+    }
 
     const userMessageText = input;
     setInput('');

@@ -21,6 +21,7 @@ export function useSession(initialLatexSource = '') {
         if (!response.ok) throw new Error('Failed to create session');
 
         const data = await response.json();
+        console.log('[useSession] Session created:', data.sessionId);
         setSessionId(data.sessionId);
         // Use initial LaTeX if provided, otherwise use server's default
         setLatexSource(initialLatexSource || data.latexSource || '');
@@ -35,6 +36,10 @@ export function useSession(initialLatexSource = '') {
 
     initSession();
   }, [initialLatexSource]);
+
+  useEffect(() => {
+    console.log('[useSession] sessionId changed:', sessionId);
+  }, [sessionId]);
 
   // Fetch the latest session data (including updated latexSource and messages)
   const refreshSessionData = useCallback(async () => {

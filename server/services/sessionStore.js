@@ -16,11 +16,18 @@ function createSessionState(seedLatexSource) {
 export function createSession(seedLatexSource) {
   const session = createSessionState(seedLatexSource);
   sessions.set(session.id, session);
+  console.log('[sessionStore] Created session:', session.id, '- Total sessions now:', sessions.size);
   return session;
 }
 
 export function getSession(sessionId) {
-  return sessions.get(sessionId) || null;
+  console.log('[sessionStore] Looking up sessionId:', sessionId);
+  console.log('[sessionStore] Available sessions:', Array.from(sessions.keys()));
+  const session = sessions.get(sessionId) || null;
+  if (!session) {
+    console.log('[sessionStore] Session NOT found');
+  }
+  return session;
 }
 
 export function updateSession(sessionId, updater) {

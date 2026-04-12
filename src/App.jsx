@@ -67,6 +67,8 @@ Welcome to CV Builder! Start chatting to build your resume. Tell me about your n
 function App() {
   const { sessionId, latexSource, messages, isLoading, refreshSessionData } = useSession(INITIAL_SAMPLE_LATEX);
 
+  console.log('[App] Current sessionId:', sessionId);
+
   return (
     <div className="app-container">
       <div className="panes-layout">
