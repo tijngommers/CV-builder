@@ -70,6 +70,38 @@ test('chat turn persists message history and latex source in session', async () 
   assert.equal(latexSource.length > 0, true);
 });
 
+test('multi-turn updates preserve LaTeX header and document anchors', async () => {
+  const originalApiKey = process.env.ANTHROPIC_API_KEY;
+  process.env.ANTHROPIC_API_KEY = '';
+
+  try {
+    const created = await request(app).post('/api/sessions').send({});
+    const sessionId = created.body.sessionId;
+
+    await request(app)
+      .post(`/api/sessions/${sessionId}/chat`)
+      .set('Accept', 'text/event-stream')
+      .send({ message: 'Mijn naam is Tijn Gommers.' });
+
+    await request(app)
+      .post(`/api/sessions/${sessionId}/chat`)
+      .set('Accept', 'text/event-stream')
+      .send({ message: 'Voeg ook mijn opleiding toe.' });
+
+    const sessionResponse = await request(app).get(`/api/sessions/${sessionId}`);
+    assert.equal(sessionResponse.status, 200);
+
+    const { latexSource } = sessionResponse.body;
+    assert.equal(typeof latexSource, 'string');
+    assert.match(latexSource, /\\documentclass/);
+    assert.match(latexSource, /\\begin\{document\}/);
+    assert.match(latexSource, /\\end\{document\}/);
+    assert.match(latexSource, /CONTACT|Resume Draft|Full Name/);
+  } finally {
+    process.env.ANTHROPIC_API_KEY = originalApiKey;
+  }
+});
+
 test('DELETE /api/sessions/:sessionId/history/:index reverts previous version', async () => {
   const created = await request(app).post('/api/sessions').send({});
   const sessionId = created.body.sessionId;

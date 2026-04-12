@@ -53,7 +53,7 @@ app.use((req, res, next) => {
 
 // Log API configuration at startup
 const apiKeyStatus = process.env.ANTHROPIC_API_KEY ? '✓ REAL API' : '⚠ FALLBACK MODE (no API key)';
-const claudeModel = process.env.CLAUDE_MODEL || 'claude-3-5-haiku-latest';
+const claudeModel = process.env.CLAUDE_MODEL || 'claude-opus-4-1-20250805';
 console.log(`[server-startup] API Mode: ${apiKeyStatus}`);
 console.log(`[server-startup] Claude Model: ${claudeModel}`);
 console.log(`[server-startup] Server starting on port ${PORT}`);
@@ -128,8 +128,12 @@ app.post('/api/sessions/:sessionId/chat', async (req, res) => {
       timestamp: new Date().toISOString()
     });
 
-    // Update LaTeX source in session
-    updateLatexSource(sessionId, assistantTurn.latexSource, userMessage);
+    // Update LaTeX source only if orchestration accepted the candidate update.
+    if (assistantTurn.shouldPersistLatex) {
+      updateLatexSource(sessionId, assistantTurn.latexSource, userMessage);
+    } else {
+      console.warn(`[chat] Skipped LaTeX persistence for session ${sessionId}. Previous LaTeX preserved.`);
+    }
 
     // Append assistant message to session history
     const assistantText = assistantTurn.events
