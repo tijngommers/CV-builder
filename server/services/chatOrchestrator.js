@@ -2,11 +2,13 @@ import Anthropic from '@anthropic-ai/sdk';
 import { Annotation, END, START, StateGraph } from '@langchain/langgraph';
 import { validateLatexSyntax } from './latexValidator.js';
 import { DEFAULT_LATEX_TEMPLATE } from '../../shared/defaultLatexTemplate.js';
+import { createLogger } from '../utils/logger.js';
 
 const CLAUDE_MODEL = process.env.CLAUDE_MODEL || 'claude-opus-4-1-20250805';
 const CLAUDE_MAX_TOKENS = Number(process.env.CLAUDE_MAX_TOKENS || 2000);
 const CONTEXT_TURNS_LIMIT = 10;
 const ICON_COMMAND_REGEX = /\\fa[A-Z][a-zA-Z]*\*?/g;
+const logger = createLogger('chatOrchestrator');
 
 const BASELINE_LATEX_OUTLINE = DEFAULT_LATEX_TEMPLATE;
 
@@ -18,7 +20,8 @@ const OrchestrationState = Annotation.Root({
   feedback: Annotation(),
   validationError: Annotation(),
   timestamp: Annotation(),
-  shouldPersistLatex: Annotation()
+  shouldPersistLatex: Annotation(),
+  requestId: Annotation()
 });
 
 function getClaudeClient() {
@@ -70,6 +73,7 @@ function buildFallbackLatex(currentLatex, userMessage) {
 }
 
 async function draftLatexNode(state) {
+  const requestLogger = logger.child({ requestId: state.requestId || 'unknown' });
   const claude = getClaudeClient();
   const userMessage = typeof state.userMessage === 'string' ? state.userMessage.trim() : '';
   const conversationHistory = Array.isArray(state.conversationHistory)
@@ -78,6 +82,9 @@ async function draftLatexNode(state) {
   const session = state.session;
 
   if (!session) {
+    requestLogger.error('draft_latex.session_missing', {
+      reasonCode: 'SESSION_CONTEXT_MISSING'
+    });
     return {
       latexSource: BASELINE_LATEX_OUTLINE,
       timestamp: new Date().toISOString(),
@@ -101,7 +108,10 @@ async function draftLatexNode(state) {
   ];
 
   if (!claude) {
-    console.warn('[chatOrchestrator] No API key - using fallback');
+    requestLogger.warn('draft_latex.no_api_key_fallback', {
+      reasonCode: 'NO_API_KEY',
+      currentLatexLength: currentLatex.length
+    });
     return {
       latexSource: buildFallbackLatex(currentLatex, userMessage),
       timestamp: new Date().toISOString(),
@@ -111,7 +121,13 @@ async function draftLatexNode(state) {
   }
 
   try {
-    console.log('[chatOrchestrator] Calling Claude API - Model:', CLAUDE_MODEL, 'Tokens:', CLAUDE_MAX_TOKENS);
+    const startedAt = Date.now();
+    requestLogger.info('draft_latex.api_call.start', {
+      model: CLAUDE_MODEL,
+      maxTokens: CLAUDE_MAX_TOKENS,
+      historyTurns: conversationHistory.length,
+      currentLatexLength: currentLatex.length
+    });
 
     const systemPrompt = [
       'You are a professional resume writer and LaTeX expert.',
@@ -147,15 +163,32 @@ async function draftLatexNode(state) {
       system: systemPrompt,
       messages
     });
+    requestLogger.info('draft_latex.api_call.success', {
+      model: CLAUDE_MODEL,
+      durationMs: Date.now() - startedAt,
+      usage: response?.usage
+        ? {
+            inputTokens: response.usage.input_tokens,
+            outputTokens: response.usage.output_tokens,
+            cacheCreationInputTokens: response.usage.cache_creation_input_tokens,
+            cacheReadInputTokens: response.usage.cache_read_input_tokens
+          }
+        : undefined
+    });
 
     const fullResponse = extractTextFromClaudeResponse(response);
-    console.log('[chatOrchestrator] Raw Claude response (first 300 chars):', fullResponse.substring(0, 300));
+    requestLogger.debug('draft_latex.api_response.received', {
+      responseLength: fullResponse.length
+    });
 
     const normalizedResponse = normalizeJsonPayload(fullResponse);
     const parsed = JSON.parse(normalizedResponse);
     const feedback = typeof parsed.feedback === 'string' ? parsed.feedback.trim() : 'Resume updated';
     const latexSource = typeof parsed.latex === 'string' ? parsed.latex.trim() : '';
-    console.log('[chatOrchestrator] JSON parsed successfully. Feedback:', feedback.substring(0, 100));
+    requestLogger.info('draft_latex.parse.success', {
+      feedbackLength: feedback.length,
+      latexLength: latexSource.length
+    });
 
     return {
       latexSource,
@@ -164,12 +197,19 @@ async function draftLatexNode(state) {
       shouldPersistLatex: true
     };
   } catch (error) {
-    console.error('[chatOrchestrator] ERROR:', error instanceof Error ? error.message : String(error), 'Full:', error);
+    requestLogger.error('draft_latex.api_or_parse_failure', {
+      error,
+      reasonCode: 'API_OR_PARSE_FAILURE'
+    });
 
     const message = error instanceof Error ? error.message : String(error);
-    const shouldFallback = /credit balance is too low|invalid_request_error|timeout|network|rate limit|429/i.test(message);
+    const shouldFallback = /credit balance is too low|invalid_request_error|timeout|network|rate limit|429|not valid json|unexpected token|json/i.test(message);
 
     if (shouldFallback) {
+      requestLogger.warn('draft_latex.fallback_applied', {
+        reasonCode: 'EXTERNAL_API_UNAVAILABLE',
+        currentLatexLength: currentLatex.length
+      });
       return {
         latexSource: buildFallbackLatex(currentLatex, userMessage),
         feedback: 'API unavailable right now. I kept your structure and captured your request so you can continue editing.',
@@ -179,6 +219,10 @@ async function draftLatexNode(state) {
       };
     }
 
+    requestLogger.error('draft_latex.hard_failure_preserving_previous', {
+      reasonCode: 'UNSAFE_UPDATE_REJECTED',
+      currentLatexLength: currentLatex.length
+    });
     return {
       latexSource: currentLatex || BASELINE_LATEX_OUTLINE,
       feedback: `Could not safely apply this update. Kept your previous resume unchanged. (${message})`,
@@ -190,7 +234,12 @@ async function draftLatexNode(state) {
 }
 
 async function validateLatexNode(state) {
+  const requestLogger = logger.child({ requestId: state.requestId || 'unknown' });
   if (state.shouldPersistLatex === false) {
+    requestLogger.warn('validate_latex.skip_requested', {
+      reasonCode: 'PERSISTENCE_DISABLED_FROM_PREVIOUS_STEP',
+      validationError: state.validationError || null
+    });
     return {
       validationError: state.validationError || 'LaTeX update was rejected before validation.',
       latexSource: typeof state.latexSource === 'string' && state.latexSource.trim()
@@ -207,6 +256,9 @@ async function validateLatexNode(state) {
   const resetIntent = hasResetIntent(userMessage);
 
   if (!latexSource) {
+    requestLogger.error('validate_latex.empty_source', {
+      reasonCode: 'NO_LATEX_SOURCE'
+    });
     return {
       validationError: 'No LaTeX source generated',
       latexSource: previousLatex || BASELINE_LATEX_OUTLINE,
@@ -217,6 +269,11 @@ async function validateLatexNode(state) {
 
   const validation = validateLatexSyntax(latexSource);
   if (!validation.valid) {
+    requestLogger.warn('validate_latex.syntax_failed', {
+      reasonCode: 'SYNTAX_VALIDATION_FAILED',
+      errorCount: validation.errors?.length || 0,
+      warningCount: validation.warnings?.length || 0
+    });
     return {
       validationError: validation.errors?.join('; ') || 'LaTeX syntax error',
       latexSource: previousLatex || BASELINE_LATEX_OUTLINE,
@@ -234,6 +291,10 @@ async function validateLatexNode(state) {
     const candidateHasFontAwesome = latexSource.includes('\\usepackage{fontawesome5}');
 
     if ((previousHasFontAwesome && !candidateHasFontAwesome) || missingIcons.length > 0) {
+      requestLogger.warn('validate_latex.icon_loss_rejected', {
+        reasonCode: 'ICON_FORMATTING_LOSS',
+        missingIcons
+      });
       return {
         validationError: `Candidate LaTeX lost icon commands: ${missingIcons.join(', ') || 'fontawesome5 package removed'}.`,
         latexSource: previousLatex,
@@ -244,6 +305,10 @@ async function validateLatexNode(state) {
 
     const shrinkRatio = previousLatex.length > 0 ? latexSource.length / previousLatex.length : 1;
     if (shrinkRatio < 0.7) {
+      requestLogger.warn('validate_latex.unexpected_shrink_rejected', {
+        reasonCode: 'UNEXPECTED_CONTENT_SHRINK',
+        shrinkRatio: Number(shrinkRatio.toFixed(2))
+      });
       return {
         validationError: `Candidate LaTeX shrank unexpectedly (ratio: ${shrinkRatio.toFixed(2)}).`,
         latexSource: previousLatex,
@@ -253,6 +318,10 @@ async function validateLatexNode(state) {
     }
   }
 
+  requestLogger.info('validate_latex.accepted', {
+    reasonCode: 'VALIDATION_ACCEPTED',
+    latexLength: latexSource.length
+  });
   return {
     validationError: null,
     latexSource,
@@ -269,7 +338,15 @@ const orchestrationGraph = new StateGraph(OrchestrationState)
   .addEdge('validate_latex', END)
   .compile();
 
-export async function buildAssistantTurn({ session, userMessage = '' }) {
+export async function buildAssistantTurn({ session, userMessage = '', requestId = 'unknown' }) {
+  const requestLogger = logger.child({ requestId });
+  const startTime = Date.now();
+  requestLogger.info('assistant_turn.start', {
+    sessionId: session?.id || 'unknown',
+    messageLength: userMessage.length,
+    historyCount: Array.isArray(session?.messages) ? session.messages.length : 0
+  });
+
   const conversationHistory = (session?.messages || []).map((msg) => ({
     role: msg.role || 'user',
     content: msg.content || ''
@@ -281,13 +358,20 @@ export async function buildAssistantTurn({ session, userMessage = '' }) {
     conversationHistory,
     latexSource: '',
     validationError: null,
-    shouldPersistLatex: true
+    shouldPersistLatex: true,
+    requestId
   });
 
   const now = finalState.timestamp || new Date().toISOString();
   const hasError = Boolean(finalState.validationError);
 
-  console.log('[buildAssistantTurn] Final state - feedback:', finalState.feedback?.substring(0, 80), 'latexLength:', finalState.latexSource?.length, 'persist:', Boolean(finalState.shouldPersistLatex));
+  requestLogger.info('assistant_turn.end', {
+    durationMs: Date.now() - startTime,
+    hasError,
+    shouldPersistLatex: Boolean(finalState.shouldPersistLatex),
+    latexLength: finalState.latexSource?.length || 0,
+    feedbackLength: finalState.feedback?.length || 0
+  });
 
   const events = [
     {

@@ -1,6 +1,8 @@
 import { randomUUID } from 'node:crypto';
+import { createLogger } from '../utils/logger.js';
 
 const sessions = new Map();
+const logger = createLogger('sessionStore');
 
 function createSessionState(seedLatexSource) {
   return {
@@ -16,16 +18,28 @@ function createSessionState(seedLatexSource) {
 export function createSession(seedLatexSource) {
   const session = createSessionState(seedLatexSource);
   sessions.set(session.id, session);
-  console.log('[sessionStore] Created session:', session.id, '- Total sessions now:', sessions.size);
+  logger.info('session.create.success', {
+    sessionId: session.id,
+    totalSessions: sessions.size,
+    hasSeedLatex: Boolean(seedLatexSource)
+  });
   return session;
 }
 
 export function getSession(sessionId) {
-  console.log('[sessionStore] Looking up sessionId:', sessionId);
-  console.log('[sessionStore] Available sessions:', Array.from(sessions.keys()));
   const session = sessions.get(sessionId) || null;
   if (!session) {
-    console.log('[sessionStore] Session NOT found');
+    logger.warn('session.get.miss', {
+      sessionId,
+      totalSessions: sessions.size
+    });
+  } else {
+    logger.debug('session.get.hit', {
+      sessionId,
+      totalSessions: sessions.size,
+      messageCount: session.messages.length,
+      historyCount: session.latexHistory.length
+    });
   }
   return session;
 }
@@ -33,12 +47,28 @@ export function getSession(sessionId) {
 export function updateSession(sessionId, updater) {
   const current = sessions.get(sessionId);
   if (!current) {
+    logger.warn('session.update.miss', { sessionId, totalSessions: sessions.size });
     return null;
   }
 
-  const nextState = updater(current);
+  let nextState;
+  try {
+    nextState = updater(current);
+  } catch (error) {
+    logger.error('session.update.updater_failed', {
+      sessionId,
+      error
+    });
+    throw error;
+  }
+
   nextState.updatedAt = new Date().toISOString();
   sessions.set(sessionId, nextState);
+  logger.debug('session.update.success', {
+    sessionId,
+    messageCount: nextState.messages.length,
+    historyCount: nextState.latexHistory.length
+  });
   return nextState;
 }
 
@@ -74,6 +104,11 @@ export function updateLatexSource(sessionId, newLatexSource, userRequestSummary 
 export function revertLatexToVersion(sessionId, historyIndex) {
   const session = sessions.get(sessionId);
   if (!session || !session.latexHistory[historyIndex]) {
+    logger.warn('session.revert.invalid_index', {
+      sessionId,
+      historyIndex,
+      historyCount: session?.latexHistory?.length || 0
+    });
     return null;
   }
 
@@ -88,9 +123,17 @@ export function revertLatexToVersion(sessionId, historyIndex) {
     userRequestSummary: 'Reverted'
   });
 
-  return updateSession(sessionId, () => ({
+  const reverted = updateSession(sessionId, () => ({
     ...session,
     latexSource: historyEntry.latexSource,
     latexHistory: newHistory
   }));
+
+  logger.info('session.revert.success', {
+    sessionId,
+    historyIndex,
+    historyCount: reverted?.latexHistory?.length || 0
+  });
+
+  return reverted;
 }

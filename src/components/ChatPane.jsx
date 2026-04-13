@@ -1,5 +1,8 @@
 import { useRef, useEffect, useState } from 'react';
 import './ChatPane.css';
+import { createLogger, createRequestId } from '../utils/logger';
+
+const logger = createLogger('ChatPane');
 
 export function ChatPane({ sessionId, messages = [], isLoading: parentLoading, onMessageSent, onResetSession }) {
   const [input, setInput] = useState('');
@@ -20,9 +23,19 @@ export function ChatPane({ sessionId, messages = [], isLoading: parentLoading, o
 
   const handleSendMessage = async (e) => {
     e.preventDefault();
-    console.log('[ChatPane] Attempting to send message. sessionId:', sessionId, 'input:', input.length > 0);
+    const requestId = createRequestId();
+    const requestLogger = logger.child({ requestId, sessionId: sessionId || 'missing' });
+    requestLogger.info('chat.send.attempt', {
+      hasInput: input.length > 0,
+      isLoading
+    });
     if (!input.trim() || !sessionId || isLoading) {
-      console.log('[ChatPane] Validation failed: trim=' + input.trim().length + ', sessionId=' + Boolean(sessionId) + ', isLoading=' + isLoading);
+      requestLogger.warn('chat.send.blocked', {
+        reasonCode: 'INPUT_OR_SESSION_INVALID',
+        inputLength: input.trim().length,
+        hasSession: Boolean(sessionId),
+        isLoading
+      });
       return;
     }
 
@@ -38,17 +51,30 @@ export function ChatPane({ sessionId, messages = [], isLoading: parentLoading, o
     });
 
     try {
-      console.log('[ChatPane] Sending msg:', userMessageText.substring(0, 80));
+      const startedAt = performance.now();
+      requestLogger.info('chat.send.request_start', {
+        messageLength: userMessageText.length
+      });
       const response = await fetch(`/api/sessions/${sessionId}/chat`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Request-Id': requestId
+        },
         body: JSON.stringify({ message: userMessageText })
       });
 
-      console.log('[ChatPane] Status:', response.status);
+      requestLogger.info('chat.send.response', {
+        statusCode: response.status,
+        durationMs: Math.round(performance.now() - startedAt)
+      });
       if (!response.ok) {
         const errText = await response.text();
-        console.error('[ChatPane] HTTP Error:', response.status, errText.substring(0, 200));
+        requestLogger.error('chat.send.http_error', {
+          reasonCode: 'CHAT_HTTP_ERROR',
+          statusCode: response.status,
+          errorBodyLength: errText.length
+        });
         throw new Error(`HTTP ${response.status}: ${errText.substring(0, 100)}`);
       }
 
@@ -85,10 +111,16 @@ export function ChatPane({ sessionId, messages = [], isLoading: parentLoading, o
                 if (typeof data.text === 'string') {
                   assistantText = data.text.trim() || 'Processed (no feedback)';
                 }
-                console.log('[ChatPane] Received feedback:', assistantText.substring(0, 80));
+                requestLogger.debug('chat.stream.assistant_message', {
+                  textLength: assistantText.length,
+                  isError: Boolean(data.isError)
+                });
               }
-            } catch {
-              // Skip parse errors
+            } catch (error) {
+              requestLogger.warn('chat.stream.parse_error', {
+                reasonCode: 'SSE_PARSE_ERROR',
+                error
+              });
             }
           }
         }
@@ -96,15 +128,20 @@ export function ChatPane({ sessionId, messages = [], isLoading: parentLoading, o
 
       setPendingMessage(null);
 
-      console.log('[ChatPane] Request succeeded');
+      requestLogger.info('chat.send.completed', {
+        feedbackLength: assistantText.length
+      });
       // Refresh session data to get the latest messages and latexSource from server
       if (onMessageSent) {
-        console.log('[ChatPane] Calling refresh...');
+        requestLogger.debug('chat.send.trigger_refresh');
         onMessageSent();
       }
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'Unknown error';
-      console.error('[ChatPane] ERROR:', errorMessage, err);
+      requestLogger.error('chat.send.failed', {
+        reasonCode: 'CHAT_SEND_FAILED',
+        error: err
+      });
       setError(errorMessage);
       setPendingMessage(null);
     } finally {

@@ -1,11 +1,17 @@
 import { useCallback, useEffect, useState } from 'react';
+import { createLogger, createRequestId } from '../utils/logger';
 
 const SESSION_STORAGE_KEY = 'cv-builder-session-id';
+const logger = createLogger('useSession');
 
 function getStoredSessionId() {
   try {
     return localStorage.getItem(SESSION_STORAGE_KEY);
-  } catch {
+  } catch (error) {
+    logger.warn('storage.read.failed', {
+      reasonCode: 'LOCAL_STORAGE_READ_FAILED',
+      error
+    });
     return null;
   }
 }
@@ -13,16 +19,22 @@ function getStoredSessionId() {
 function setStoredSessionId(sessionId) {
   try {
     localStorage.setItem(SESSION_STORAGE_KEY, sessionId);
-  } catch {
-    // Ignore storage failures.
+  } catch (error) {
+    logger.warn('storage.write.failed', {
+      reasonCode: 'LOCAL_STORAGE_WRITE_FAILED',
+      error
+    });
   }
 }
 
 function clearStoredSessionId() {
   try {
     localStorage.removeItem(SESSION_STORAGE_KEY);
-  } catch {
-    // Ignore storage failures.
+  } catch (error) {
+    logger.warn('storage.remove.failed', {
+      reasonCode: 'LOCAL_STORAGE_REMOVE_FAILED',
+      error
+    });
   }
 }
 
@@ -38,17 +50,35 @@ export function useSession(initialLatexSource = '') {
   useEffect(() => {
     const initSession = async () => {
       setIsLoading(true);
+      const requestId = createRequestId();
+      const requestLogger = logger.child({ requestId });
       try {
         const storedSessionId = getStoredSessionId();
+        requestLogger.info('session.init.start', {
+          hasStoredSession: Boolean(storedSessionId)
+        });
         if (storedSessionId) {
+          const restoreStart = performance.now();
           const restoreResponse = await fetch(`/api/sessions/${storedSessionId}`, {
             method: 'GET',
-            headers: { 'Content-Type': 'application/json' }
+            headers: {
+              'Content-Type': 'application/json',
+              'X-Request-Id': requestId
+            }
+          });
+
+          requestLogger.info('session.restore.response', {
+            statusCode: restoreResponse.status,
+            durationMs: Math.round(performance.now() - restoreStart)
           });
 
           if (restoreResponse.ok) {
             const restored = await restoreResponse.json();
-            console.log('[useSession] Restored session:', restored.sessionId);
+            requestLogger.info('session.restore.success', {
+              sessionId: restored.sessionId,
+              messageCount: restored.messages?.length || 0,
+              historyCount: restored.latexHistory?.length || 0
+            });
             setSessionId(restored.sessionId);
             setLatexSource(restored.latexSource || initialLatexSource || '');
             setLatexHistory(restored.latexHistory || []);
@@ -58,25 +88,44 @@ export function useSession(initialLatexSource = '') {
           }
 
           if (restoreResponse.status === 404) {
+            requestLogger.warn('session.restore.not_found', {
+              reasonCode: 'STORED_SESSION_NOT_FOUND',
+              storedSessionId
+            });
             clearStoredSessionId();
           }
         }
 
+        const createStart = performance.now();
         const response = await fetch('/api/sessions', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: {
+            'Content-Type': 'application/json',
+            'X-Request-Id': requestId
+          },
           body: JSON.stringify({ latexSource: initialLatexSource })
+        });
+
+        requestLogger.info('session.create.response', {
+          statusCode: response.status,
+          durationMs: Math.round(performance.now() - createStart)
         });
 
         if (!response.ok) throw new Error('Failed to create session');
 
         const data = await response.json();
-        console.log('[useSession] Session created:', data.sessionId);
+        requestLogger.info('session.create.success', {
+          sessionId: data.sessionId
+        });
         setSessionId(data.sessionId);
         setStoredSessionId(data.sessionId);
         // Use initial LaTeX if provided, otherwise use server's default
         setLatexSource(initialLatexSource || data.latexSource || '');
       } catch (err) {
+        requestLogger.error('session.init.failed', {
+          reasonCode: 'SESSION_INIT_FAILED',
+          error: err
+        });
         setError(err instanceof Error ? err.message : 'Session creation failed');
         // Even if session creation fails, show the initial LaTeX
         setLatexSource(initialLatexSource);
@@ -89,20 +138,34 @@ export function useSession(initialLatexSource = '') {
   }, [initialLatexSource]);
 
   useEffect(() => {
-    console.log('[useSession] sessionId changed:', sessionId);
+    logger.debug('session.id.changed', { sessionId });
   }, [sessionId]);
 
   // Fetch the latest session data (including updated latexSource and messages)
   const refreshSessionData = useCallback(async () => {
     if (!sessionId) return;
+    const requestId = createRequestId();
+    const requestLogger = logger.child({ requestId, sessionId });
 
     try {
+      const startedAt = performance.now();
       const response = await fetch(`/api/sessions/${sessionId}`, {
         method: 'GET',
-        headers: { 'Content-Type': 'application/json' }
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Request-Id': requestId
+        }
+      });
+
+      requestLogger.info('session.refresh.response', {
+        statusCode: response.status,
+        durationMs: Math.round(performance.now() - startedAt)
       });
 
       if (response.status === 404) {
+        requestLogger.warn('session.refresh.not_found', {
+          reasonCode: 'SESSION_NOT_FOUND'
+        });
         clearStoredSessionId();
       }
 
@@ -112,7 +175,15 @@ export function useSession(initialLatexSource = '') {
       setLatexSource(data.latexSource || '');
       setLatexHistory(data.latexHistory || []);
       setMessages(data.messages || []);
+      requestLogger.debug('session.refresh.success', {
+        messageCount: data.messages?.length || 0,
+        historyCount: data.latexHistory?.length || 0
+      });
     } catch (err) {
+      requestLogger.error('session.refresh.failed', {
+        reasonCode: 'SESSION_REFRESH_FAILED',
+        error: err
+      });
       setError(err instanceof Error ? err.message : 'Failed to refresh session');
     }
   }, [sessionId]);
@@ -121,12 +192,23 @@ export function useSession(initialLatexSource = '') {
     setIsLoading(true);
     setError(null);
     clearStoredSessionId();
+    const requestId = createRequestId();
+    const requestLogger = logger.child({ requestId, previousSessionId: sessionId });
 
     try {
+      const startedAt = performance.now();
       const response = await fetch('/api/sessions', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Request-Id': requestId
+        },
         body: JSON.stringify({ latexSource: initialLatexSource })
+      });
+
+      requestLogger.info('session.reset.response', {
+        statusCode: response.status,
+        durationMs: Math.round(performance.now() - startedAt)
       });
 
       if (!response.ok) throw new Error('Failed to create a new session');
@@ -137,23 +219,40 @@ export function useSession(initialLatexSource = '') {
       setLatexSource(initialLatexSource || data.latexSource || '');
       setLatexHistory([]);
       setMessages([]);
-      console.log('[useSession] Session reset to new id:', data.sessionId);
+      requestLogger.info('session.reset.success', {
+        newSessionId: data.sessionId
+      });
     } catch (err) {
+      requestLogger.error('session.reset.failed', {
+        reasonCode: 'SESSION_RESET_FAILED',
+        error: err
+      });
       setError(err instanceof Error ? err.message : 'Failed to reset session');
     } finally {
       setIsLoading(false);
     }
-  }, [initialLatexSource]);
+  }, [initialLatexSource, sessionId]);
 
   // Revert to a previous LaTeX version
   const revertToVersion = useCallback(
     async (historyIndex) => {
       if (!sessionId) return;
+      const requestId = createRequestId();
+      const requestLogger = logger.child({ requestId, sessionId, historyIndex });
 
       try {
+        const startedAt = performance.now();
         const response = await fetch(`/api/sessions/${sessionId}/history/${historyIndex}`, {
           method: 'DELETE',
-          headers: { 'Content-Type': 'application/json' }
+          headers: {
+            'Content-Type': 'application/json',
+            'X-Request-Id': requestId
+          }
+        });
+
+        requestLogger.info('session.revert.response', {
+          statusCode: response.status,
+          durationMs: Math.round(performance.now() - startedAt)
         });
 
         if (!response.ok) throw new Error('Failed to revert version');
@@ -161,7 +260,14 @@ export function useSession(initialLatexSource = '') {
         const data = await response.json();
         setLatexSource(data.latexSource || '');
         setLatexHistory(data.latexHistory || []);
+        requestLogger.info('session.revert.success', {
+          historyCount: data.latexHistory?.length || 0
+        });
       } catch (err) {
+        requestLogger.error('session.revert.failed', {
+          reasonCode: 'SESSION_REVERT_FAILED',
+          error: err
+        });
         setError(err instanceof Error ? err.message : 'Failed to revert version');
       }
     },
