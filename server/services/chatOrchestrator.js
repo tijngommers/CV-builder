@@ -54,6 +54,14 @@ function normalizeJsonPayload(text = '') {
   return fencedMatch ? fencedMatch[1].trim() : trimmed;
 }
 
+function safeStringify(value) {
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return '[unserializable]';
+  }
+}
+
 function hasResetIntent(userMessage = '') {
   return /(reset|rewrite|start over|from scratch|opnieuw|helemaal opnieuw)/i.test(userMessage);
 }
@@ -161,6 +169,10 @@ async function buildAssistantTurnFromOperations({ session, userMessage = '', req
     });
 
     const text = extractTextFromClaudeResponse(response);
+    requestLogger.info('assistant_turn_operations.raw_model_output', {
+      rawModelOutput: text,
+      rawModelOutputJson: safeStringify(response)
+    });
     const payload = extractOperationPayload(text);
     const operationValidation = validateResumeOperations(payload.operations);
     if (!operationValidation.valid) {
@@ -352,6 +364,10 @@ async function draftLatexNode(state) {
     });
 
     const fullResponse = extractTextFromClaudeResponse(response);
+    requestLogger.info('draft_latex.raw_model_output', {
+      rawModelOutput: fullResponse,
+      rawModelOutputJson: safeStringify(response)
+    });
     requestLogger.debug('draft_latex.api_response.received', {
       responseLength: fullResponse.length
     });

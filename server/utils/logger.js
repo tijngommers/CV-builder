@@ -16,6 +16,11 @@ const REDACTED_KEYS = new Set([
   'prompt'
 ]);
 
+const NON_TRUNCATED_KEYS = new Set([
+  'rawModelOutput',
+  'rawModelOutputJson'
+]);
+
 function getConfiguredLevel() {
   const configured = String(process.env.LOG_LEVEL || 'info').toLowerCase();
   return LEVEL_PRIORITY[configured] ? configured : 'info';
@@ -70,7 +75,7 @@ function redactValue(key, value) {
     };
   }
 
-  if (typeof value === 'string' && value.length > 500) {
+  if (typeof value === 'string' && value.length > 500 && !NON_TRUNCATED_KEYS.has(key)) {
     return `${value.slice(0, 500)}...[truncated ${value.length - 500} chars]`;
   }
 
