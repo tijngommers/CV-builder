@@ -18,7 +18,8 @@ const REDACTED_KEYS = new Set([
 
 const NON_TRUNCATED_KEYS = new Set([
   'rawModelOutput',
-  'rawModelOutputJson'
+  'rawModelOutputJson',
+  'rawModelOutputChunk'
 ]);
 
 function getConfiguredLevel() {

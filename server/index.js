@@ -19,7 +19,10 @@ try {
       const [key, ...valueParts] = trimmed.split('=');
       const value = valueParts.join('=');
       if (key && value) {
-        process.env[key.trim()] = value.trim();
+        const normalizedKey = key.trim();
+        if (process.env[normalizedKey] === undefined) {
+          process.env[normalizedKey] = value.trim();
+        }
       }
     }
   });
@@ -38,8 +41,84 @@ const DEFAULT_PDFLATEX_TIMEOUT_MS = 180000;
 const PDFLATEX_TIMEOUT_MS = Number(process.env.PDFLATEX_TIMEOUT_MS || DEFAULT_PDFLATEX_TIMEOUT_MS);
 const logger = createLogger('server');
 
+function resolveOperationModeConfig() {
+  const rawValue = process.env.USE_OPERATION_MODE;
+  const normalizedValue = typeof rawValue === 'string' ? rawValue.trim() : '';
+  const isValid = normalizedValue === '0' || normalizedValue === '1';
+
+  return {
+    enabled: normalizedValue === '1',
+    rawValue: rawValue ?? '',
+    normalizedValue,
+    isValid
+  };
+}
+
 function resolvePdflatexCommand() {
   return process.env.PDFLATEX_PATH || 'pdflatex';
+}
+
+function extractPdflatexError(pdflatexOutput = '') {
+  const lines = pdflatexOutput.split('\n');
+  const errors = [];
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+
+    // Look for error lines starting with "!"
+    if (line.startsWith('!')) {
+      const errorMsg = line.substring(1).trim();
+      let failingLine = null;
+
+      // Next line often contains "l.NNN" where NNN is the line number
+      if (i + 1 < lines.length) {
+        const nextLine = lines[i + 1];
+        const lineMatch = nextLine.match(/^l\.(\d+)\s/);
+        if (lineMatch) {
+          failingLine = parseInt(lineMatch[1], 10);
+        }
+      }
+
+      // Classify error
+      let errorClass = 'UNKNOWN';
+      if (errorMsg.includes('missing \\item')) {
+        errorClass = 'MISSING_ITEM';
+      } else if (errorMsg.includes('Undefined control sequence')) {
+        errorClass = 'UNDEFINED_COMMAND';
+      } else if (errorMsg.includes('environment')) {
+        errorClass = 'ENVIRONMENT_ERROR';
+      } else if (errorMsg.includes('preamble')) {
+        errorClass = 'PREAMBLE_ERROR';
+      }
+
+      errors.push({
+        message: errorMsg,
+        failingLine,
+        errorClass,
+        context: i + 1 < lines.length ? lines.slice(i, Math.min(i + 4, lines.length)) : []
+      });
+    }
+  }
+
+  return errors;
+}
+
+function getLatexContextWindow(texContent = '', failingLine = null, windowSize = 10) {
+  if (!failingLine || failingLine <= 0) {
+    return null;
+  }
+
+  const lines = texContent.split('\n');
+  const startLine = Math.max(0, failingLine - windowSize);
+  const endLine = Math.min(lines.length, failingLine + windowSize);
+  const contextLines = lines.slice(startLine, endLine);
+
+  return {
+    startLine: startLine + 1,
+    endLine,
+    lines: contextLines,
+    failingLineIndex: failingLine - startLine - 1
+  };
 }
 
 // Enable CORS for all routes
@@ -86,12 +165,26 @@ app.use((req, res, next) => {
 // Log API configuration at startup
 const apiKeyStatus = process.env.ANTHROPIC_API_KEY ? '✓ REAL API' : '⚠ FALLBACK MODE (no API key)';
 const claudeModel = process.env.CLAUDE_MODEL || 'claude-opus-4-1-20250805';
+const operationMode = resolveOperationModeConfig();
 logger.info('startup.configuration', {
   apiMode: apiKeyStatus,
   claudeModel,
   port: PORT,
-  pdflatexTimeoutMs: PDFLATEX_TIMEOUT_MS
+  pdflatexTimeoutMs: PDFLATEX_TIMEOUT_MS,
+  operationMode: operationMode.enabled ? 'operation' : 'legacy_latex',
+  useOperationModeRaw: operationMode.rawValue,
+  useOperationModeNormalized: operationMode.normalizedValue,
+  useOperationModeValid: operationMode.isValid
 });
+
+if (!operationMode.isValid) {
+  logger.warn('startup.configuration.invalid_use_operation_mode', {
+    reasonCode: 'INVALID_USE_OPERATION_MODE',
+    useOperationModeRaw: operationMode.rawValue,
+    useOperationModeNormalized: operationMode.normalizedValue,
+    expectedValues: '0|1'
+  });
+}
 
 app.use(express.json({ limit: '1mb' }));
 
@@ -337,6 +430,18 @@ function runPdflatex(workingDirectory, texFileName, requestLogger = logger) {
     childProcess.on('close', (code) => {
       clearTimeout(timeout);
       if (code !== 0) {
+        // Parse pdflatex errors for better diagnostics
+        const parsedErrors = extractPdflatexError(stdOutput);
+        const errorDiagnostics = parsedErrors.length > 0
+          ? {
+              errorCount: parsedErrors.length,
+              primaryError: parsedErrors[0].message,
+              errorClass: parsedErrors[0].errorClass,
+              failingLine: parsedErrors[0].failingLine,
+              topErrors: parsedErrors.slice(0, 3)
+            }
+          : null;
+
         requestLogger.error('render_pdf.pdflatex.failed', {
           reasonCode: 'PDFLATEX_NON_ZERO_EXIT',
           exitCode: code,
@@ -344,7 +449,8 @@ function runPdflatex(workingDirectory, texFileName, requestLogger = logger) {
           stderrLength: stdErrorOutput.length,
           stdoutLength: stdOutput.length,
           stderrSnippet: stdErrorOutput.slice(0, 400),
-          stdoutSnippet: stdOutput.slice(0, 200)
+          stdoutSnippet: stdOutput.slice(0, 200),
+          ...errorDiagnostics
         });
         reject(new Error(`pdflatex failed with code ${code}. ${stdErrorOutput || stdOutput}`));
         return;
@@ -401,12 +507,45 @@ app.post('/api/render-pdf', async (req, res) => {
     res.send(pdfBuffer);
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Failed to generate PDF.';
+    
+    // Try to extract and provide context for pdflatex errors
+    let enhancedError = message;
+    try {
+      if (message.includes('pdflatex failed')) {
+        const parsedErrors = extractPdflatexError(message);
+        if (parsedErrors.length > 0 && parsedErrors[0].failingLine) {
+          const texContent = await fs.readFile(texPath, 'utf-8').catch(() => null);
+          if (texContent) {
+            const context = getLatexContextWindow(texContent, parsedErrors[0].failingLine, 5);
+            if (context) {
+              requestLogger.error('render_pdf.pdflatex_context', {
+                failingLine: parsedErrors[0].failingLine,
+                errorClass: parsedErrors[0].errorClass,
+                errorMessage: parsedErrors[0].message,
+                contextStartLine: context.startLine,
+                contextEndLine: context.endLine,
+                contextLines: context.lines,
+                failingLineIndex: context.failingLineIndex
+              });
+              enhancedError = `LaTeX error at line ${parsedErrors[0].failingLine} (${parsedErrors[0].errorClass}): ${parsedErrors[0].message}. Context preserved in logs.`;
+            }
+          }
+        }
+      }
+    } catch (contextError) {
+      // Silently fail context extraction; main error is still reported
+      requestLogger.debug('render_pdf.context_extraction_failed', {
+        error: contextError instanceof Error ? contextError.message : String(contextError)
+      });
+    }
+
     requestLogger.error('render_pdf.failed', {
       reasonCode: 'PDF_RENDER_FAILURE',
       error,
-      durationMs: Date.now() - startTime
+      durationMs: Date.now() - startTime,
+      userMessage: enhancedError
     });
-    res.status(500).json({ error: message });
+    res.status(500).json({ error: enhancedError });
   } finally {
     try {
       await fs.rm(jobDirectory, { recursive: true, force: true });

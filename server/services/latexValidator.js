@@ -38,6 +38,10 @@ export function validateLatexSyntax(latexSource = '') {
   const environmentErrors = validateEnvironmentPairing(trimmed);
   errors.push(...environmentErrors);
 
+  // Check for balanced list markers and empty blocks
+  const listErrors = validateListStructure(trimmed);
+  errors.push(...listErrors);
+
   const result = {
     valid: errors.length === 0,
     errors: errors.length > 0 ? errors : undefined
@@ -150,4 +154,42 @@ function validateResumeStructure(latexSource) {
   }
 
   return warnings;
+}
+
+function validateListStructure(latexSource) {
+  const errors = [];
+
+  // Check for balanced \resumeSubHeadingListStart/End pairs
+  const subHeadingStartCount = (latexSource.match(/\\resumeSubHeadingListStart/g) || []).length;
+  const subHeadingEndCount = (latexSource.match(/\\resumeSubHeadingListEnd/g) || []).length;
+  if (subHeadingStartCount !== subHeadingEndCount) {
+    errors.push(`Mismatched \\resumeSubHeadingListStart (${subHeadingStartCount}) and \\resumeSubHeadingListEnd (${subHeadingEndCount}) markers`);
+  }
+
+  // Check for balanced \resumeItemListStart/End pairs
+  const itemStartCount = (latexSource.match(/\\resumeItemListStart/g) || []).length;
+  const itemEndCount = (latexSource.match(/\\resumeItemListEnd/g) || []).length;
+  if (itemStartCount !== itemEndCount) {
+    errors.push(`Mismatched \\resumeItemListStart (${itemStartCount}) and \\resumeItemListEnd (${itemEndCount}) markers`);
+  }
+
+  // Check for empty list blocks: \resumeSubHeadingListStart immediately followed by \resumeSubHeadingListEnd
+  const emptySubHeadingPattern = /\\resumeSubHeadingListStart\s*\\resumeSubHeadingListEnd/g;
+  if (emptySubHeadingPattern.test(latexSource)) {
+    errors.push('Found empty \\resumeSubHeadingListStart...\\resumeSubHeadingListEnd block with no items');
+  }
+
+  // Check for empty \begin{itemize}...\end{itemize} blocks (no \item inside)
+  const itemizePattern = /\\begin\{itemize\}([\s\S]*?)\\end\{itemize\}/g;
+  let itemizeMatch;
+  // eslint-disable-next-line no-cond-assign
+  while ((itemizeMatch = itemizePattern.exec(latexSource)) !== null) {
+    const content = itemizeMatch[1];
+    if (!content.includes('\\item')) {
+      const lineNum = latexSource.substring(0, itemizeMatch.index).split('\n').length;
+      errors.push(`Empty \\begin{itemize}...\\end{itemize} block at line ${lineNum} (no \\item inside)`);
+    }
+  }
+
+  return errors;
 }

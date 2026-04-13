@@ -28,7 +28,27 @@ function joinNonEmpty(parts, separator = ' ') {
   return parts.filter(Boolean).join(separator);
 }
 
-function renderHeading(contact) {
+// Returns a line counter object with methods to track and emit line numbers
+function createLineTracker() {
+  let currentLine = 1;
+
+  return {
+    count(text) {
+      if (!text) return 0;
+      const newlines = (text.match(/\n/g) || []).length;
+      currentLine += newlines;
+      return newlines;
+    },
+    current() {
+      return currentLine;
+    },
+    getMarker(label) {
+      return `% [LINE ${this.current()}] ${label}`;
+    }
+  };
+}
+
+function renderHeading(contact, lineTracker = null) {
   const fullName = escapeLatex(contact?.fullName || '[Your Name]');
   const phone = escapeLatex(contact?.phone || '[Phone]');
   const email = escapeLatex(contact?.email || '[Email]');
@@ -49,88 +69,126 @@ function renderHeading(contact) {
 
   const contactLine = infoParts.join(' \\hspace{1pt} $|$ \\hspace{1pt} ');
 
-  return [
+  const lines = [
     '%----------HEADING----------',
     '\\begin{center}',
     `    \\textbf{\\Huge ${fullName}} \\\\ \\vspace{5pt}`,
     `    \\small ${contactLine}`,
     '    \\\\ \\vspace{-3pt}',
     '\\end{center}'
-  ].join('\n');
+  ];
+
+  if (lineTracker) {
+    lineTracker.count(lines.join('\n'));
+  }
+
+  return lines.join('\n');
 }
 
-function renderTimelineSection(section) {
+function renderTimelineSection(section, lineTracker = null) {
   if (!section?.visible) {
     return '';
   }
 
   const entries = Array.isArray(section.entries) ? section.entries : [];
-  const renderedEntries = entries.map((entry) => {
-    const heading = escapeLatex(entry.organization || entry.heading || '[Organization]');
-    const dateLabel = escapeLatex(entry.dateLabel || joinNonEmpty([entry.startDate, entry.endDate], ' -- ') || '[Start -- End]');
-    const role = escapeLatex(entry.subheading || entry.heading || '[Role]');
-    const location = escapeLatex(entry.location || '[Location]');
-    const bullets = Array.isArray(entry.bullets) ? entry.bullets : [];
+  const renderedEntries = entries
+    .map((entry) => {
+      const heading = escapeLatex(entry.organization || entry.heading || '[Organization]');
+      const dateLabel = escapeLatex(entry.dateLabel || joinNonEmpty([entry.startDate, entry.endDate], ' -- ') || '[Start -- End]');
+      const role = escapeLatex(entry.subheading || entry.heading || '[Role]');
+      const location = escapeLatex(entry.location || '[Location]');
+      const bullets = Array.isArray(entry.bullets) ? entry.bullets : [];
 
-    const bulletBlock = bullets.length > 0
-      ? [
-          '      \\resumeItemListStart',
-          ...bullets.map((bullet) => `        \\resumeItem{${escapeLatex(bullet)}}`),
-          '      \\resumeItemListEnd'
-        ].join('\n')
-      : '';
-
-    return [
-      '    \\resumeSubheading',
-      `      {${heading}}{${dateLabel}}`,
-      `      {${role}}{${location}}`,
-      bulletBlock
-    ].filter(Boolean).join('\n');
-  });
-
-  return [
-    `%-----------${escapeLatex(section.title)}-----------`,
-    `\\section{${escapeLatex(section.title)}}`,
-    '  \\resumeSubHeadingListStart',
-    ...renderedEntries,
-    '  \\resumeSubHeadingListEnd'
-  ].join('\n');
-}
-
-function renderProjectsSection(section) {
-  if (!section?.visible) {
-    return '';
-  }
-
-  const entries = Array.isArray(section.entries) ? section.entries : [];
-  const renderedEntries = entries.map((entry) => {
-    const title = escapeLatex(entry.heading || entry.organization || '[Project]');
-    const dateLabel = escapeLatex(entry.dateLabel || joinNonEmpty([entry.startDate, entry.endDate], ' -- ') || '[Start -- End]');
-    const bullets = Array.isArray(entry.bullets) ? entry.bullets : [];
-
-    return [
-      '    \\resumeProjectHeading',
-      `      {\\textbf{${title}}}{${dateLabel}}`,
-      bullets.length > 0
+      const bulletBlock = bullets.length > 0
         ? [
             '      \\resumeItemListStart',
             ...bullets.map((bullet) => `        \\resumeItem{${escapeLatex(bullet)}}`),
             '      \\resumeItemListEnd'
           ].join('\n')
-        : ''
-    ].filter(Boolean).join('\n');
-  });
+        : '';
 
-  return [
-    '%-----------PROJECTS-----------',
+      return [
+        '    \\resumeSubheading',
+        `      {${heading}}{${dateLabel}}`,
+        `      {${role}}{${location}}`,
+        bulletBlock
+      ].filter(Boolean).join('\n');
+    })
+    .filter((rendered) => rendered && rendered.trim().length > 0);
+
+  if (renderedEntries.length === 0) {
+    return '';
+  }
+
+  const lines = [
+    `%-----------${escapeLatex(section.title)}-----------`,
     `\\section{${escapeLatex(section.title)}}`,
+    lineTracker ? lineTracker.getMarker(`SECTION_START ${section.id}`) : '',
     '  \\resumeSubHeadingListStart',
+    lineTracker ? lineTracker.getMarker(`LIST_START ${section.id}`) : '',
     ...renderedEntries,
+    lineTracker ? lineTracker.getMarker(`LIST_END ${section.id}`) : '',
     '  \\resumeSubHeadingListEnd'
-  ].join('\n');
+  ].filter(Boolean);
+
+  const output = lines.join('\n');
+  if (lineTracker) {
+    lineTracker.count(output);
+  }
+
+  return output;
 }
 
-function renderSkillsSection(section) {
+function renderProjectsSection(section, lineTracker = null) {
+  if (!section?.visible) {
+    return '';
+  }
+
+  const entries = Array.isArray(section.entries) ? section.entries : [];
+  const renderedEntries = entries
+    .map((entry) => {
+      const title = escapeLatex(entry.heading || entry.organization || '[Project]');
+      const dateLabel = escapeLatex(entry.dateLabel || joinNonEmpty([entry.startDate, entry.endDate], ' -- ') || '[Start -- End]');
+      const bullets = Array.isArray(entry.bullets) ? entry.bullets : [];
+
+      return [
+        '    \\resumeProjectHeading',
+        `      {\\textbf{${title}}}{${dateLabel}}`,
+        bullets.length > 0
+          ? [
+              '      \\resumeItemListStart',
+              ...bullets.map((bullet) => `        \\resumeItem{${escapeLatex(bullet)}}`),
+              '      \\resumeItemListEnd'
+            ].join('\n')
+          : ''
+      ].filter(Boolean).join('\n');
+    })
+    .filter((rendered) => rendered && rendered.trim().length > 0);
+
+  if (renderedEntries.length === 0) {
+    return '';
+  }
+
+  const lines = [
+    '%-----------PROJECTS-----------',
+    `\\section{${escapeLatex(section.title)}}`,
+    lineTracker ? lineTracker.getMarker(`SECTION_START ${section.id}`) : '',
+    '  \\resumeSubHeadingListStart',
+    lineTracker ? lineTracker.getMarker(`LIST_START ${section.id}`) : '',
+    ...renderedEntries,
+    lineTracker ? lineTracker.getMarker(`LIST_END ${section.id}`) : '',
+    '  \\resumeSubHeadingListEnd'
+  ].filter(Boolean);
+
+  const output = lines.join('\n');
+  if (lineTracker) {
+    lineTracker.count(output);
+  }
+
+  return output;
+}
+
+function renderSkillsSection(section, lineTracker = null) {
   if (!section?.visible) {
     return '';
   }
@@ -142,15 +200,29 @@ function renderSkillsSection(section) {
       return `    \\textbf{${escapeLatex(entry.topicLabel)}}: {${items || '[Add items]'}}`;
     });
 
-  return [
+  if (topicLines.length === 0) {
+    return '';
+  }
+
+  const lines = [
     '%-----------SKILLS-----------',
     `\\section{${escapeLatex(section.title)}}`,
+    lineTracker ? lineTracker.getMarker(`SECTION_START ${section.id}`) : '',
     '\\begin{itemize}[leftmargin=0in, label={}]',
+    lineTracker ? lineTracker.getMarker(`ITEMIZE_START ${section.id}`) : '',
     '  \\small{\\item{',
     ...topicLines,
     '  }}',
+    lineTracker ? lineTracker.getMarker(`ITEMIZE_END ${section.id}`) : '',
     '\\end{itemize}'
-  ].join('\n');
+  ].filter(Boolean);
+
+  const output = lines.join('\n');
+  if (lineTracker) {
+    lineTracker.count(output);
+  }
+
+  return output;
 }
 
 function resolveSectionById(resumeData, sectionId) {
@@ -160,25 +232,30 @@ function resolveSectionById(resumeData, sectionId) {
   return (resumeData.customSections || []).find((section) => section.id === sectionId) || null;
 }
 
-function renderSection(section) {
+function renderSection(section, lineTracker = null) {
   if (!section) {
     return '';
   }
 
   if (section.id === 'projects') {
-    return renderProjectsSection(section);
+    return renderProjectsSection(section, lineTracker);
   }
 
   if (section.id === 'skills' || section.type === 'topic_groups') {
-    return renderSkillsSection(section);
+    return renderSkillsSection(section, lineTracker);
   }
 
-  return renderTimelineSection(section);
+  return renderTimelineSection(section, lineTracker);
 }
 
 export function translateResumeDataToLatex(resumeData) {
+  const lineTracker = createLineTracker();
   const preamble = getTemplatePreamble();
-  const heading = renderHeading(resumeData.contact || {});
+  lineTracker.count(preamble);
+
+  const heading = renderHeading(resumeData.contact || {}, lineTracker);
+  lineTracker.count('\n\n');
+
   const sectionOrder = Array.isArray(resumeData.presentation?.sectionOrder)
     ? resumeData.presentation.sectionOrder
     : Object.keys(resumeData.sections || {});
@@ -186,9 +263,11 @@ export function translateResumeDataToLatex(resumeData) {
   const renderedSections = sectionOrder
     .map((sectionId) => resolveSectionById(resumeData, sectionId))
     .filter(Boolean)
-    .map((section) => renderSection(section))
+    .map((section) => renderSection(section, lineTracker))
     .filter(Boolean)
     .join('\n\n');
+
+  lineTracker.count(renderedSections);
 
   return [
     preamble,

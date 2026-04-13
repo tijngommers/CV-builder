@@ -24,7 +24,8 @@
     "dev:server": "node server/index.js",
     "start": "npm run dev",
     "start:server": "node server/index.js",
-    "test": "node --test",
+    "test": "set \"ANTHROPIC_API_KEY=\" && node --test",
+    "test:api": "node --test",
     "build": "vite build",
     "preview": "vite preview",
     "lint": "echo 'Add eslint configuration for linting'"

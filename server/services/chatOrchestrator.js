@@ -9,10 +9,9 @@ import { applyResumeOperations } from './resumeOperationApplier.js';
 import { translateResumeDataToLatex } from './resumeLatexTranslator.js';
 
 const CLAUDE_MODEL = process.env.CLAUDE_MODEL || 'claude-opus-4-1-20250805';
-const CLAUDE_MAX_TOKENS = Number(process.env.CLAUDE_MAX_TOKENS || 2000);
-const CONTEXT_TURNS_LIMIT = 10;
+const CLAUDE_MAX_TOKENS = Number(process.env.CLAUDE_MAX_TOKENS || 900);
+const CONTEXT_TURNS_LIMIT = Number(process.env.CONTEXT_TURNS_LIMIT || 4);
 const ICON_COMMAND_REGEX = /\\fa[A-Z][a-zA-Z]*\*?/g;
-const USE_OPERATION_MODE = process.env.USE_OPERATION_MODE === '1';
 const logger = createLogger('chatOrchestrator');
 
 const BASELINE_LATEX_OUTLINE = DEFAULT_LATEX_TEMPLATE;
@@ -60,6 +59,19 @@ function safeStringify(value) {
   } catch {
     return '[unserializable]';
   }
+}
+
+function resolveOperationMode() {
+  const rawValue = process.env.USE_OPERATION_MODE;
+  const normalizedValue = typeof rawValue === 'string' ? rawValue.trim() : '';
+  const isValid = normalizedValue === '0' || normalizedValue === '1';
+
+  return {
+    enabled: normalizedValue === '1',
+    rawValue: rawValue ?? '',
+    normalizedValue,
+    isValid
+  };
 }
 
 function logRawModelOutput(requestLogger, eventPrefix, rawText, rawResponse) {
@@ -563,11 +575,29 @@ const orchestrationGraph = new StateGraph(OrchestrationState)
   .compile();
 
 export async function buildAssistantTurn({ session, userMessage = '', requestId = 'unknown' }) {
-  if (USE_OPERATION_MODE) {
+  const requestLogger = logger.child({ requestId });
+  const mode = resolveOperationMode();
+
+  requestLogger.info('assistant_turn.mode_selected', {
+    mode: mode.enabled ? 'operation' : 'legacy_latex',
+    rawUseOperationMode: mode.rawValue,
+    normalizedUseOperationMode: mode.normalizedValue,
+    validUseOperationMode: mode.isValid
+  });
+
+  if (!mode.isValid) {
+    requestLogger.warn('assistant_turn.mode_invalid_env', {
+      reasonCode: 'INVALID_USE_OPERATION_MODE',
+      rawUseOperationMode: mode.rawValue,
+      normalizedUseOperationMode: mode.normalizedValue,
+      expectedValues: '0|1'
+    });
+  }
+
+  if (mode.enabled) {
     return buildAssistantTurnFromOperations({ session, userMessage, requestId });
   }
 
-  const requestLogger = logger.child({ requestId });
   const startTime = Date.now();
   requestLogger.info('assistant_turn.start', {
     sessionId: session?.id || 'unknown',
