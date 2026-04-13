@@ -62,6 +62,45 @@ function safeStringify(value) {
   }
 }
 
+function logRawModelOutput(requestLogger, eventPrefix, rawText, rawResponse) {
+  const text = typeof rawText === 'string' ? rawText : '';
+  const chunkSize = 1800;
+  const totalChunks = Math.max(1, Math.ceil(text.length / chunkSize));
+
+  requestLogger.info(`${eventPrefix}.start`, {
+    responseLength: text.length,
+    totalChunks
+  });
+
+  if (text.length === 0) {
+    requestLogger.info(`${eventPrefix}.chunk`, {
+      chunkIndex: 1,
+      totalChunks,
+      rawModelOutputChunk: ''
+    });
+  } else {
+    for (let index = 0; index < totalChunks; index += 1) {
+      const start = index * chunkSize;
+      const end = start + chunkSize;
+      const chunk = text.slice(start, end);
+      requestLogger.info(`${eventPrefix}.chunk`, {
+        chunkIndex: index + 1,
+        totalChunks,
+        rawModelOutputChunk: chunk
+      });
+    }
+  }
+
+  requestLogger.info(`${eventPrefix}.full_response_json`, {
+    rawModelOutputJson: safeStringify(rawResponse)
+  });
+
+  requestLogger.info(`${eventPrefix}.end`, {
+    responseLength: text.length,
+    totalChunks
+  });
+}
+
 function hasResetIntent(userMessage = '') {
   return /(reset|rewrite|start over|from scratch|opnieuw|helemaal opnieuw)/i.test(userMessage);
 }
@@ -169,10 +208,7 @@ async function buildAssistantTurnFromOperations({ session, userMessage = '', req
     });
 
     const text = extractTextFromClaudeResponse(response);
-    requestLogger.info('assistant_turn_operations.raw_model_output', {
-      rawModelOutput: text,
-      rawModelOutputJson: safeStringify(response)
-    });
+    logRawModelOutput(requestLogger, 'assistant_turn_operations.raw_model_output', text, response);
     const payload = extractOperationPayload(text);
     const operationValidation = validateResumeOperations(payload.operations);
     if (!operationValidation.valid) {
@@ -364,10 +400,7 @@ async function draftLatexNode(state) {
     });
 
     const fullResponse = extractTextFromClaudeResponse(response);
-    requestLogger.info('draft_latex.raw_model_output', {
-      rawModelOutput: fullResponse,
-      rawModelOutputJson: safeStringify(response)
-    });
+    logRawModelOutput(requestLogger, 'draft_latex.raw_model_output', fullResponse, response);
     requestLogger.debug('draft_latex.api_response.received', {
       responseLength: fullResponse.length
     });
