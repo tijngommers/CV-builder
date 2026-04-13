@@ -3,11 +3,16 @@ import { Annotation, END, START, StateGraph } from '@langchain/langgraph';
 import { validateLatexSyntax } from './latexValidator.js';
 import { DEFAULT_LATEX_TEMPLATE } from '../../shared/defaultLatexTemplate.js';
 import { createLogger } from '../utils/logger.js';
+import { createDefaultResumeData } from './resumeSchema.js';
+import { validateResumeOperations } from './resumeValidator.js';
+import { applyResumeOperations } from './resumeOperationApplier.js';
+import { translateResumeDataToLatex } from './resumeLatexTranslator.js';
 
 const CLAUDE_MODEL = process.env.CLAUDE_MODEL || 'claude-opus-4-1-20250805';
 const CLAUDE_MAX_TOKENS = Number(process.env.CLAUDE_MAX_TOKENS || 2000);
 const CONTEXT_TURNS_LIMIT = 10;
 const ICON_COMMAND_REGEX = /\\fa[A-Z][a-zA-Z]*\*?/g;
+const USE_OPERATION_MODE = process.env.USE_OPERATION_MODE === '1';
 const logger = createLogger('chatOrchestrator');
 
 const BASELINE_LATEX_OUTLINE = DEFAULT_LATEX_TEMPLATE;
@@ -70,6 +75,176 @@ function buildFallbackLatex(currentLatex, userMessage) {
   }
 
   return `${base}\n${insertion}`;
+}
+
+function extractOperationPayload(responseText = '') {
+  const normalized = normalizeJsonPayload(responseText);
+  const parsed = JSON.parse(normalized);
+
+  return {
+    feedback: typeof parsed.feedback === 'string' ? parsed.feedback.trim() : 'Updated resume sections.',
+    nextSteps: Array.isArray(parsed.nextSteps) ? parsed.nextSteps.filter((item) => typeof item === 'string') : [],
+    operations: Array.isArray(parsed.operations) ? parsed.operations : []
+  };
+}
+
+async function buildAssistantTurnFromOperations({ session, userMessage = '', requestId = 'unknown' }) {
+  const requestLogger = logger.child({ requestId });
+  const startTime = Date.now();
+  const claude = getClaudeClient();
+  const resumeData = session?.resumeData || createDefaultResumeData();
+
+  requestLogger.info('assistant_turn_operations.start', {
+    sessionId: session?.id || 'unknown',
+    messageLength: userMessage.length,
+    historyCount: Array.isArray(session?.messages) ? session.messages.length : 0
+  });
+
+  if (!claude) {
+    requestLogger.warn('assistant_turn_operations.no_api_key', {
+      reasonCode: 'NO_API_KEY'
+    });
+
+    return {
+      latexSource: session?.latexSource || DEFAULT_LATEX_TEMPLATE,
+      resumeData,
+      operationsApplied: [],
+      validationError: null,
+      events: [
+        {
+          type: 'user_message',
+          payload: { text: userMessage, timestamp: new Date().toISOString() }
+        },
+        {
+          type: 'assistant_message',
+          payload: {
+            text: 'Operation mode is enabled, but no API key is configured. I kept your resume unchanged.',
+            timestamp: new Date().toISOString(),
+            isError: false,
+            nextSteps: ['Add ANTHROPIC_API_KEY to enable operation generation.']
+          }
+        }
+      ],
+      shouldPersistLatex: false
+    };
+  }
+
+  try {
+    const conversationHistory = Array.isArray(session?.messages)
+      ? session.messages.slice(-CONTEXT_TURNS_LIMIT).map((msg) => ({ role: msg.role, content: msg.content }))
+      : [];
+
+    const prompt = [
+      'You update a resume using OPERATIONS ONLY. Never return LaTeX.',
+      'Return ONLY valid JSON with this shape:',
+      '{"feedback":"string","nextSteps":["string"],"operations":[{"operationId":"string","opType":"string","target":{},"payload":{}}]}',
+      '',
+      'Rules:',
+      '- Prefer additive changes unless user asks to replace/remove.',
+      '- Use only supported operation types: set_contact_field, add_contact_link, remove_contact_link, add_section, update_section_meta, toggle_section_visibility, reorder_sections, add_entry, update_entry, remove_entry, add_bullet, update_bullet, remove_bullet, add_topic_group, update_topic_group, remove_topic_group.',
+      '- Include operationId for each operation (uuid-like string).',
+      '- Never emit markdown fences or extra text outside JSON.',
+      '',
+      'Current resume JSON:',
+      JSON.stringify(resumeData)
+    ].join('\n');
+
+    const response = await claude.messages.create({
+      model: CLAUDE_MODEL,
+      max_tokens: CLAUDE_MAX_TOKENS,
+      temperature: 0.2,
+      system: prompt,
+      messages: [
+        ...conversationHistory,
+        { role: 'user', content: userMessage }
+      ]
+    });
+
+    const text = extractTextFromClaudeResponse(response);
+    const payload = extractOperationPayload(text);
+    const operationValidation = validateResumeOperations(payload.operations);
+    if (!operationValidation.valid) {
+      throw new Error(`Operation validation failed: ${JSON.stringify(operationValidation.errors)}`);
+    }
+
+    const applied = applyResumeOperations({
+      resumeData,
+      operations: payload.operations,
+      requestId
+    });
+
+    const translatedLatex = translateResumeDataToLatex(applied.resumeData);
+    const syntaxValidation = validateLatexSyntax(translatedLatex);
+    if (!syntaxValidation.valid) {
+      throw new Error(`Translated LaTeX failed validation: ${syntaxValidation.errors?.join('; ') || 'unknown error'}`);
+    }
+
+    const timestamp = new Date().toISOString();
+    requestLogger.info('assistant_turn_operations.success', {
+      durationMs: Date.now() - startTime,
+      operationsApplied: payload.operations.length,
+      latexLength: translatedLatex.length
+    });
+
+    const nextStepsText = payload.nextSteps.length > 0
+      ? `\n\nNext steps:\n- ${payload.nextSteps.join('\n- ')}`
+      : '';
+
+    return {
+      latexSource: translatedLatex,
+      resumeData: applied.resumeData,
+      operationsApplied: payload.operations,
+      validationError: null,
+      events: [
+        {
+          type: 'user_message',
+          payload: { text: userMessage, timestamp }
+        },
+        {
+          type: 'assistant_message',
+          payload: {
+            text: `${payload.feedback}${nextStepsText}`,
+            latexSource: translatedLatex,
+            timestamp,
+            isError: false,
+            operationsApplied: payload.operations.length,
+            nextSteps: payload.nextSteps
+          }
+        }
+      ],
+      shouldPersistLatex: true
+    };
+  } catch (error) {
+    requestLogger.error('assistant_turn_operations.failed', {
+      error,
+      reasonCode: 'OPERATION_MODE_FAILED',
+      durationMs: Date.now() - startTime
+    });
+
+    const timestamp = new Date().toISOString();
+    return {
+      latexSource: session?.latexSource || DEFAULT_LATEX_TEMPLATE,
+      resumeData,
+      operationsApplied: [],
+      validationError: error instanceof Error ? error.message : String(error),
+      events: [
+        {
+          type: 'user_message',
+          payload: { text: userMessage, timestamp }
+        },
+        {
+          type: 'assistant_message',
+          payload: {
+            text: 'I could not apply structured operations safely, so I preserved your previous resume state.',
+            timestamp,
+            isError: true,
+            nextSteps: ['Try a more specific instruction for one section at a time.']
+          }
+        }
+      ],
+      shouldPersistLatex: false
+    };
+  }
 }
 
 async function draftLatexNode(state) {
@@ -339,6 +514,10 @@ const orchestrationGraph = new StateGraph(OrchestrationState)
   .compile();
 
 export async function buildAssistantTurn({ session, userMessage = '', requestId = 'unknown' }) {
+  if (USE_OPERATION_MODE) {
+    return buildAssistantTurnFromOperations({ session, userMessage, requestId });
+  }
+
   const requestLogger = logger.child({ requestId });
   const startTime = Date.now();
   requestLogger.info('assistant_turn.start', {

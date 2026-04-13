@@ -30,7 +30,7 @@ try {
 
 // NOW import modules that depend on process.env
 import { buildAssistantTurn } from './services/chatOrchestrator.js';
-import { appendSessionMessage, createSession, getSession, updateLatexSource, revertLatexToVersion } from './services/sessionStore.js';
+import { appendSessionMessage, createSession, getSession, updateLatexSource, revertLatexToVersion, updateResumeData } from './services/sessionStore.js';
 
 export const app = express();
 const PORT = Number(process.env.PORT || 3001);
@@ -209,6 +209,9 @@ app.post('/api/sessions/:sessionId/chat', async (req, res) => {
     // Update LaTeX source only if orchestration accepted the candidate update.
     if (assistantTurn.shouldPersistLatex) {
       updateLatexSource(sessionId, assistantTurn.latexSource, userMessage);
+      if (assistantTurn.resumeData) {
+        updateResumeData(sessionId, assistantTurn.resumeData, assistantTurn.operationsApplied || []);
+      }
       requestLogger.info('chat.latex.persisted', {
         sessionId,
         latexLength: assistantTurn.latexSource.length

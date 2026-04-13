@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { createLogger } from '../utils/logger.js';
+import { createDefaultResumeData } from './resumeSchema.js';
 
 const sessions = new Map();
 const logger = createLogger('sessionStore');
@@ -11,7 +12,9 @@ function createSessionState(seedLatexSource) {
     updatedAt: new Date().toISOString(),
     messages: [],
     latexSource: seedLatexSource || '',
-    latexHistory: []
+    latexHistory: [],
+    resumeData: createDefaultResumeData(),
+    operationLog: []
   };
 }
 
@@ -99,6 +102,22 @@ export function updateLatexSource(sessionId, newLatexSource, userRequestSummary 
       latexHistory: nextHistory
     };
   });
+}
+
+export function updateResumeData(sessionId, newResumeData, operations = []) {
+  return updateSession(sessionId, (session) => ({
+    ...session,
+    resumeData: newResumeData,
+    operationLog: [
+      ...session.operationLog,
+      ...operations.map((operation) => ({
+        operationId: operation.operationId || randomUUID(),
+        opType: operation.opType,
+        target: operation.target,
+        timestamp: operation.timestamp || new Date().toISOString()
+      }))
+    ]
+  }));
 }
 
 export function revertLatexToVersion(sessionId, historyIndex) {
