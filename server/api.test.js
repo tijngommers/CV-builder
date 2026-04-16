@@ -47,7 +47,6 @@ test('GET /api/sessions/:sessionId returns session state', async () => {
   assert.equal(response.status, 200);
   assert.equal(response.body.sessionId, sessionId);
   assert.equal(Array.isArray(response.body.messages), true);
-  assert.equal(Array.isArray(response.body.latexHistory), true);
   assert.equal(typeof response.body.latexSource, 'string');
 });
 
@@ -133,38 +132,6 @@ test('multi-turn updates preserve LaTeX header and document anchors', async () =
   } finally {
     process.env.ANTHROPIC_API_KEY = originalApiKey;
   }
-});
-
-test('DELETE /api/sessions/:sessionId/history/:index reverts previous version', async () => {
-  const created = await request(app).post('/api/sessions').send({});
-  const sessionId = created.body.sessionId;
-
-  // Make a chat request - it may fail due to operation contract issues,
-  // but the session should still work
-  await request(app)
-    .post(`/api/sessions/${sessionId}/chat`)
-    .set('Accept', 'text/event-stream')
-    .send({ message: 'Add a skill.' });
-
-  const sessionData = await request(app).get(`/api/sessions/${sessionId}`);
-  assert.equal(sessionData.status, 200);
-  assert.equal(Array.isArray(sessionData.body.latexHistory), true);
-
-  // Try to revert (may not have anything to revert if operations failed,
-  // but the endpoint should still work)
-  const revertResponse = await request(app).delete(`/api/sessions/${sessionId}/history/0`);
-  // Either succeeds or returns 400 for invalid index
-  assert(revertResponse.status === 200 || revertResponse.status === 400);
-});
-
-test('DELETE /api/sessions/:sessionId/history/:index returns 400 for invalid index', async () => {
-  const created = await request(app).post('/api/sessions').send({});
-  const sessionId = created.body.sessionId;
-
-  const response = await request(app).delete(`/api/sessions/${sessionId}/history/99`);
-
-  assert.equal(response.status, 400);
-  assert.match(response.body.error, /Invalid history index/);
 });
 
 test('translator skips empty timeline and project sections to avoid empty list wrappers', () => {
@@ -313,6 +280,22 @@ test('LaTeX validation detects empty list blocks', () => {
   // Check for empty list block detection
   const errorMessage = result.errors.join(' ');
   assert.match(errorMessage, /empty.*resumeSubHeadingList|resumeSubHeadingList.*empty/i);
+});
+
+test('LaTeX validation ignores preamble itemize macro definitions', () => {
+  const latexWithMacroDefinitions = String.raw`\documentclass{article}
+\newcommand{\resumeSubHeadingListStart}{\begin{itemize}[leftmargin=0in, label={}]}
+\newcommand{\resumeSubHeadingListEnd}{\end{itemize}}
+\begin{document}
+\section{Test}
+\begin{itemize}
+\item First item
+\end{itemize}
+\end{document}`;
+
+  const result = validateLatexSyntax(latexWithMacroDefinitions);
+
+  assert.equal(result.valid, true);
 });
 
 test('LaTeX validation detects unbalanced list markers', () => {

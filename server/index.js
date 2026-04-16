@@ -33,7 +33,7 @@ try {
 
 // NOW import modules that depend on process.env
 import { buildAssistantTurn } from './services/chatOrchestrator.js';
-import { appendSessionMessage, createSession, getSession, updateLatexSource, revertLatexToVersion, updateResumeData } from './services/sessionStore.js';
+import { appendSessionMessage, createSession, getSession, updateLatexSource, updateResumeData } from './services/sessionStore.js';
 
 export const app = express();
 const PORT = Number(process.env.PORT || 3001);
@@ -223,8 +223,7 @@ app.get('/api/sessions/:sessionId', (req, res) => {
 
   requestLogger.info('session.get.success', {
     sessionId: session.id,
-    messageCount: session.messages.length,
-    historyCount: session.latexHistory.length
+    messageCount: session.messages.length
   });
 
   res.json({
@@ -232,8 +231,7 @@ app.get('/api/sessions/:sessionId', (req, res) => {
     createdAt: session.createdAt,
     updatedAt: session.updatedAt,
     messages: session.messages,
-    latexSource: session.latexSource,
-    latexHistory: session.latexHistory
+    latexSource: session.latexSource
   });
 });
 
@@ -559,45 +557,6 @@ app.post('/api/render-pdf', async (req, res) => {
       });
     }
   }
-});
-
-app.delete('/api/sessions/:sessionId/history/:index', (req, res) => {
-  const requestLogger = req.requestLogger || logger;
-  const sessionId = req.params.sessionId;
-  const historyIndex = parseInt(req.params.index, 10);
-
-  const session = getSession(sessionId);
-  if (!session) {
-    requestLogger.warn('session.revert.session_not_found', {
-      sessionId,
-      reasonCode: 'SESSION_NOT_FOUND'
-    });
-    res.status(404).json({ error: 'Session not found.' });
-    return;
-  }
-
-  const reverted = revertLatexToVersion(sessionId, historyIndex);
-  if (!reverted) {
-    requestLogger.warn('session.revert.invalid_index', {
-      sessionId,
-      historyIndex,
-      reasonCode: 'INVALID_HISTORY_INDEX'
-    });
-    res.status(400).json({ error: 'Invalid history index or no history available.' });
-    return;
-  }
-
-  requestLogger.info('session.revert.success', {
-    sessionId,
-    historyIndex,
-    historyCount: reverted.latexHistory.length
-  });
-
-  res.json({
-    sessionId: reverted.id,
-    latexSource: reverted.latexSource,
-    latexHistory: reverted.latexHistory
-  });
 });
 
 export function startServer(port = PORT) {

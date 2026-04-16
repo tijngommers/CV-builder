@@ -12,7 +12,6 @@ function createSessionState(seedLatexSource) {
     updatedAt: new Date().toISOString(),
     messages: [],
     latexSource: seedLatexSource || '',
-    latexHistory: [],
     resumeData: createDefaultResumeData(),
     operationLog: []
   };
@@ -40,8 +39,7 @@ export function getSession(sessionId) {
     logger.debug('session.get.hit', {
       sessionId,
       totalSessions: sessions.size,
-      messageCount: session.messages.length,
-      historyCount: session.latexHistory.length
+      messageCount: session.messages.length
     });
   }
   return session;
@@ -69,8 +67,7 @@ export function updateSession(sessionId, updater) {
   sessions.set(sessionId, nextState);
   logger.debug('session.update.success', {
     sessionId,
-    messageCount: nextState.messages.length,
-    historyCount: nextState.latexHistory.length
+    messageCount: nextState.messages.length
   });
   return nextState;
 }
@@ -83,23 +80,11 @@ export function appendSessionMessage(sessionId, message) {
 }
 
 export function updateLatexSource(sessionId, newLatexSource, userRequestSummary = '') {
+  void userRequestSummary;
   return updateSession(sessionId, (session) => {
-    const previousLatex = session.latexSource;
-    const nextHistory = [...session.latexHistory];
-
-    // Only add to history if LaTeX actually changed
-    if (previousLatex !== newLatexSource) {
-      nextHistory.push({
-        timestamp: new Date().toISOString(),
-        latexSource: previousLatex,
-        userRequestSummary
-      });
-    }
-
     return {
       ...session,
-      latexSource: newLatexSource,
-      latexHistory: nextHistory
+      latexSource: newLatexSource
     };
   });
 }
@@ -120,39 +105,3 @@ export function updateResumeData(sessionId, newResumeData, operations = []) {
   }));
 }
 
-export function revertLatexToVersion(sessionId, historyIndex) {
-  const session = sessions.get(sessionId);
-  if (!session || !session.latexHistory[historyIndex]) {
-    logger.warn('session.revert.invalid_index', {
-      sessionId,
-      historyIndex,
-      historyCount: session?.latexHistory?.length || 0
-    });
-    return null;
-  }
-
-  const historyEntry = session.latexHistory[historyIndex];
-  const currentLatex = session.latexSource;
-  const newHistory = session.latexHistory.slice(0, historyIndex);
-
-  // Add current version to history before reverting
-  newHistory.push({
-    timestamp: new Date().toISOString(),
-    latexSource: currentLatex,
-    userRequestSummary: 'Reverted'
-  });
-
-  const reverted = updateSession(sessionId, () => ({
-    ...session,
-    latexSource: historyEntry.latexSource,
-    latexHistory: newHistory
-  }));
-
-  logger.info('session.revert.success', {
-    sessionId,
-    historyIndex,
-    historyCount: reverted?.latexHistory?.length || 0
-  });
-
-  return reverted;
-}

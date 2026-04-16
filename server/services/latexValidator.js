@@ -158,24 +158,30 @@ function validateResumeStructure(latexSource) {
 
 function validateListStructure(latexSource) {
   const errors = [];
+  const documentBodyRegex = /\\begin\{document\}([\s\S]*?)\\end\{document\}/;
+  const documentBodyMatch = documentBodyRegex.exec(latexSource);
+  const sourceForListValidation = documentBodyMatch ? documentBodyMatch[1] : latexSource;
+  const baseLineOffset = documentBodyMatch
+    ? latexSource.slice(0, documentBodyMatch.index).split('\n').length - 1
+    : 0;
 
   // Check for balanced \resumeSubHeadingListStart/End pairs
-  const subHeadingStartCount = (latexSource.match(/\\resumeSubHeadingListStart/g) || []).length;
-  const subHeadingEndCount = (latexSource.match(/\\resumeSubHeadingListEnd/g) || []).length;
+  const subHeadingStartCount = (sourceForListValidation.match(/\\resumeSubHeadingListStart/g) || []).length;
+  const subHeadingEndCount = (sourceForListValidation.match(/\\resumeSubHeadingListEnd/g) || []).length;
   if (subHeadingStartCount !== subHeadingEndCount) {
     errors.push(`Mismatched \\resumeSubHeadingListStart (${subHeadingStartCount}) and \\resumeSubHeadingListEnd (${subHeadingEndCount}) markers`);
   }
 
   // Check for balanced \resumeItemListStart/End pairs
-  const itemStartCount = (latexSource.match(/\\resumeItemListStart/g) || []).length;
-  const itemEndCount = (latexSource.match(/\\resumeItemListEnd/g) || []).length;
+  const itemStartCount = (sourceForListValidation.match(/\\resumeItemListStart/g) || []).length;
+  const itemEndCount = (sourceForListValidation.match(/\\resumeItemListEnd/g) || []).length;
   if (itemStartCount !== itemEndCount) {
     errors.push(`Mismatched \\resumeItemListStart (${itemStartCount}) and \\resumeItemListEnd (${itemEndCount}) markers`);
   }
 
   // Check for empty list blocks: \resumeSubHeadingListStart immediately followed by \resumeSubHeadingListEnd
   const emptySubHeadingPattern = /\\resumeSubHeadingListStart\s*\\resumeSubHeadingListEnd/g;
-  if (emptySubHeadingPattern.test(latexSource)) {
+  if (emptySubHeadingPattern.test(sourceForListValidation)) {
     errors.push('Found empty \\resumeSubHeadingListStart...\\resumeSubHeadingListEnd block with no items');
   }
 
@@ -183,10 +189,11 @@ function validateListStructure(latexSource) {
   const itemizePattern = /\\begin\{itemize\}([\s\S]*?)\\end\{itemize\}/g;
   let itemizeMatch;
   // eslint-disable-next-line no-cond-assign
-  while ((itemizeMatch = itemizePattern.exec(latexSource)) !== null) {
+  while ((itemizeMatch = itemizePattern.exec(sourceForListValidation)) !== null) {
     const content = itemizeMatch[1];
-    if (!content.includes('\\item')) {
-      const lineNum = latexSource.substring(0, itemizeMatch.index).split('\n').length;
+    const contentWithoutComments = content.replace(/(?<!\\)%.*$/gm, '').trim();
+    if (!/\\item\b/.test(contentWithoutComments)) {
+      const lineNum = baseLineOffset + sourceForListValidation.substring(0, itemizeMatch.index).split('\n').length;
       errors.push(`Empty \\begin{itemize}...\\end{itemize} block at line ${lineNum} (no \\item inside)`);
     }
   }

@@ -41,7 +41,6 @@ function clearStoredSessionId() {
 export function useSession(initialLatexSource = '') {
   const [sessionId, setSessionId] = useState(null);
   const [latexSource, setLatexSource] = useState(initialLatexSource);
-  const [latexHistory, setLatexHistory] = useState([]);
   const [messages, setMessages] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -76,12 +75,10 @@ export function useSession(initialLatexSource = '') {
             const restored = await restoreResponse.json();
             requestLogger.info('session.restore.success', {
               sessionId: restored.sessionId,
-              messageCount: restored.messages?.length || 0,
-              historyCount: restored.latexHistory?.length || 0
+              messageCount: restored.messages?.length || 0
             });
             setSessionId(restored.sessionId);
             setLatexSource(restored.latexSource || initialLatexSource || '');
-            setLatexHistory(restored.latexHistory || []);
             setMessages(restored.messages || []);
             setIsLoading(false);
             return;
@@ -173,11 +170,9 @@ export function useSession(initialLatexSource = '') {
 
       const data = await response.json();
       setLatexSource(data.latexSource || '');
-      setLatexHistory(data.latexHistory || []);
       setMessages(data.messages || []);
       requestLogger.debug('session.refresh.success', {
-        messageCount: data.messages?.length || 0,
-        historyCount: data.latexHistory?.length || 0
+        messageCount: data.messages?.length || 0
       });
     } catch (err) {
       requestLogger.error('session.refresh.failed', {
@@ -217,7 +212,6 @@ export function useSession(initialLatexSource = '') {
       setSessionId(data.sessionId);
       setStoredSessionId(data.sessionId);
       setLatexSource(initialLatexSource || data.latexSource || '');
-      setLatexHistory([]);
       setMessages([]);
       requestLogger.info('session.reset.success', {
         newSessionId: data.sessionId
@@ -233,56 +227,13 @@ export function useSession(initialLatexSource = '') {
     }
   }, [initialLatexSource, sessionId]);
 
-  // Revert to a previous LaTeX version
-  const revertToVersion = useCallback(
-    async (historyIndex) => {
-      if (!sessionId) return;
-      const requestId = createRequestId();
-      const requestLogger = logger.child({ requestId, sessionId, historyIndex });
-
-      try {
-        const startedAt = performance.now();
-        const response = await fetch(`/api/sessions/${sessionId}/history/${historyIndex}`, {
-          method: 'DELETE',
-          headers: {
-            'Content-Type': 'application/json',
-            'X-Request-Id': requestId
-          }
-        });
-
-        requestLogger.info('session.revert.response', {
-          statusCode: response.status,
-          durationMs: Math.round(performance.now() - startedAt)
-        });
-
-        if (!response.ok) throw new Error('Failed to revert version');
-
-        const data = await response.json();
-        setLatexSource(data.latexSource || '');
-        setLatexHistory(data.latexHistory || []);
-        requestLogger.info('session.revert.success', {
-          historyCount: data.latexHistory?.length || 0
-        });
-      } catch (err) {
-        requestLogger.error('session.revert.failed', {
-          reasonCode: 'SESSION_REVERT_FAILED',
-          error: err
-        });
-        setError(err instanceof Error ? err.message : 'Failed to revert version');
-      }
-    },
-    [sessionId]
-  );
-
   return {
     sessionId,
     latexSource,
     messages,
-    latexHistory,
     isLoading,
     error,
     refreshSessionData,
-    revertToVersion,
     resetSession
   };
 }

@@ -97,18 +97,11 @@ export function LivePreview({ latexSource, isLoading }) {
             <code>{previewError}</code>
           </div>
         ) : pdfUrl ? (
-          <>
-            <iframe
-              title="CV PDF Preview"
-              src={pdfUrl}
-              className="pdf-preview"
-            />
-            <div className="preview-actions">
-              <a href={pdfUrl} download="cv.pdf" className="download-btn">
-                ⬇ Download PDF
-              </a>
-            </div>
-          </>
+          <iframe
+            title="CV PDF Preview"
+            src={pdfUrl}
+            className="pdf-preview"
+          />
         ) : isGenerating ? (
           <div className="preview-loading">
             <div className="spinner"></div>
